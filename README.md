@@ -84,6 +84,7 @@ Each packaged shot includes:
 - staging and nose-room notes
 
 The package also includes a `character_bible` with per-character continuity tags and default seeds.
+For human review, the exporter also writes a `storyboard_review.md` document.
 
 ## Validation
 
@@ -130,3 +131,4 @@ This writes:
 - `render_queue.json`
 - `character_bible.json`
 - `timeline.edl`
+- `storyboard_review.md`

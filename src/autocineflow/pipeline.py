@@ -15,6 +15,7 @@ from .delivery import (
     package_to_json,
     render_queue_to_json,
     shotlist_to_csv,
+    storyboard_review_markdown,
     write_storyboard_package,
 )
 from .director_logic import build_shot, plan_scene_beats
@@ -281,6 +282,11 @@ class CineFlowPipeline:
         """Export a simple editorial decision list."""
 
         return edl_text(package)
+
+    def storyboard_review_markdown(self, package: StoryboardPackage) -> str:
+        """Export a human-readable storyboard review document."""
+
+        return storyboard_review_markdown(package)
 
     def write_delivery_package(
         self,

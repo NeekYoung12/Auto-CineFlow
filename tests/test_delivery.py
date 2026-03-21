@@ -72,6 +72,7 @@ def test_export_package_to_csv_and_json():
     character_bible_json = pipeline.character_bible_json(package, indent=2)
     csv_text = pipeline.shotlist_csv(package)
     edl = pipeline.edl_text(package)
+    review_markdown = pipeline.storyboard_review_markdown(package)
 
     manifest = json.loads(manifest_json)
     render_queue = json.loads(render_queue_json)
@@ -86,6 +87,9 @@ def test_export_package_to_csv_and_json():
     assert "render_seed" in csv_text
     assert "TITLE: Delivery Test DELIVERY_SCENE" in edl
     assert "* FROM CLIP NAME: DELIVERY_SCENE_SH001" in edl
+    assert "# Delivery Test" in review_markdown
+    assert "### DELIVERY_SCENE_SH001" in review_markdown
+    assert "**Prompt**" in review_markdown
 
 
 def test_write_delivery_package_creates_output_files():
@@ -95,13 +99,15 @@ def test_write_delivery_package_creates_output_files():
 
     try:
         written = pipeline.write_delivery_package(package, temp_dir)
-        assert set(written.keys()) == {"manifest", "shotlist", "render_queue", "character_bible", "edl"}
+        assert set(written.keys()) == {"manifest", "shotlist", "render_queue", "character_bible", "edl", "review_markdown"}
         assert written["manifest"].exists()
         assert written["shotlist"].exists()
         assert written["render_queue"].exists()
         assert written["character_bible"].exists()
         assert written["edl"].exists()
+        assert written["review_markdown"].exists()
         assert json.loads(written["manifest"].read_text(encoding="utf-8"))["scene_id"] == "DELIVERY_SCENE"
         assert len(json.loads(written["character_bible"].read_text(encoding="utf-8"))) == 2
+        assert "# Delivery Test" in written["review_markdown"].read_text(encoding="utf-8")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

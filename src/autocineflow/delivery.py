@@ -403,6 +403,53 @@ def character_bible_to_json(package: StoryboardPackage, indent: int = 2) -> str:
     )
 
 
+def storyboard_review_markdown(package: StoryboardPackage) -> str:
+    """Export a human-readable markdown review document for editorial approval."""
+
+    lines = [
+        f"# {package.project_name}",
+        "",
+        f"- Scene ID: `{package.scene_id}`",
+        f"- Location: `{package.scene_location or 'unspecified'}`",
+        f"- Emotion: `{package.detected_emotion}`",
+        f"- Analysis Source: `{package.analysis_source}`",
+        f"- Total Duration: `{package.total_duration_seconds:.2f}s`",
+        "",
+        "## Character Bible",
+        "",
+    ]
+    for character in package.character_bible:
+        lines.append(
+            f"- `{character.char_id}`: {character.visual_anchor} | continuity `{character.continuity_tag}` | seed `{character.default_seed}`"
+        )
+
+    lines.extend(["", "## Shot List", ""])
+    for shot in package.shots:
+        lines.extend(
+            [
+                f"### {shot.shot_id} · {shot.shot_type}",
+                "",
+                f"- Timeline: `{shot.timeline_in}` -> `{shot.timeline_out}`",
+                f"- Duration: `{shot.duration_seconds:.2f}s` ({shot.frame_count} frames @ {shot.fps} fps)",
+                f"- Subjects: `{', '.join(shot.primary_subjects) or 'ensemble'}`",
+                f"- Continuity: group `{shot.continuity_group}` | seed `{shot.render_seed}` | reference `{shot.reference_shot_id or 'none'}`",
+                f"- Purpose: {shot.story_purpose or 'n/a'}",
+                f"- Staging: {shot.staging_note or 'n/a'}",
+                f"- Nose Room: {shot.nose_room_note or 'n/a'}",
+                "",
+                "**Prompt**",
+                "",
+                shot.prompt,
+                "",
+                "**Negative Prompt**",
+                "",
+                shot.negative_prompt,
+                "",
+            ]
+        )
+    return "\n".join(lines).strip() + "\n"
+
+
 def edl_text(package: StoryboardPackage) -> str:
     """Export a simple CMX-style EDL for editorial review."""
 
@@ -431,12 +478,14 @@ def write_storyboard_package(
     render_queue_path = target_dir / "render_queue.json"
     character_bible_path = target_dir / "character_bible.json"
     edl_path = target_dir / "timeline.edl"
+    review_markdown_path = target_dir / "storyboard_review.md"
 
     manifest_path.write_text(package_to_json(package, indent=2), encoding="utf-8")
     shotlist_path.write_text(shotlist_to_csv(package), encoding="utf-8", newline="")
     render_queue_path.write_text(render_queue_to_json(package, indent=2), encoding="utf-8")
     character_bible_path.write_text(character_bible_to_json(package, indent=2), encoding="utf-8")
     edl_path.write_text(edl_text(package), encoding="utf-8")
+    review_markdown_path.write_text(storyboard_review_markdown(package), encoding="utf-8")
 
     return {
         "manifest": manifest_path,
@@ -444,6 +493,7 @@ def write_storyboard_package(
         "render_queue": render_queue_path,
         "character_bible": character_bible_path,
         "edl": edl_path,
+        "review_markdown": review_markdown_path,
     }
 
 
