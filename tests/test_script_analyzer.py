@@ -35,3 +35,10 @@ class TestRuleBasedScriptAnalysis:
         assert len(ctx.characters) == 2
         assert ctx.detected_emotion == "angry"
         assert ctx.primary_focus_char_id == "CHAR_A"
+
+    def test_detective_and_informant_are_detected_as_two_characters(self):
+        ctx = analyse_script_rule_based("A detective faces a wounded informant in a neon alley at night.")
+
+        assert len(ctx.characters) == 2
+        assert ctx.characters[0].visual_anchor == "detective"
+        assert ctx.characters[1].visual_anchor == "wounded informant"

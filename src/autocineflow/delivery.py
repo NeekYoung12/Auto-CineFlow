@@ -98,6 +98,7 @@ class StoryboardPackage(BaseModel):
     total_duration_seconds: float = Field(..., ge=0.1)
     render_preset: RenderPreset
     readiness_report: dict[str, bool] = Field(default_factory=dict)
+    quality_report: dict[str, Any] = Field(default_factory=dict)
     character_bible: list[CharacterBibleEntry] = Field(default_factory=list)
     shots: list[DeliveryShot] = Field(default_factory=list)
     render_queue: list[RenderJob] = Field(default_factory=list)
@@ -282,6 +283,7 @@ def build_storyboard_package(
     project_name: str = "Auto-CineFlow Project",
     render_preset: RenderPreset | None = None,
     readiness_report: dict[str, bool] | None = None,
+    quality_report: dict[str, Any] | None = None,
     generated_at: str | None = None,
 ) -> StoryboardPackage:
     """Create a production-ready delivery package from a scene context."""
@@ -313,6 +315,7 @@ def build_storyboard_package(
         total_duration_seconds=total_duration_seconds,
         render_preset=render_preset,
         readiness_report=readiness_report or {},
+        quality_report=quality_report or {},
         character_bible=character_bible,
         shots=delivery_shots,
         render_queue=render_queue,

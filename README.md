@@ -12,6 +12,7 @@ Auto-CineFlow is an LLM-driven cinematic storyboard generator for 1-2 character 
 - English and Chinese scene parsing with dialogue extraction
 - Prompt assembly for Stable Diffusion-style image/video workflows
 - Delivery packaging to manifest JSON, shot list CSV, render queue JSON, and editorial EDL
+- Provider bundles for common generation stacks such as Automatic1111-style and ComfyUI-oriented payloads
 - Acceptance and production-readiness reports
 
 ## Architecture
@@ -85,6 +86,7 @@ Each packaged shot includes:
 
 The package also includes a `character_bible` with per-character continuity tags and default seeds.
 For human review, the exporter also writes a `storyboard_review.md` document.
+Provider-oriented files are also written for downstream generators.
 
 ## Validation
 
@@ -132,3 +134,35 @@ This writes:
 - `character_bible.json`
 - `timeline.edl`
 - `storyboard_review.md`
+- `providers/automatic1111_txt2img.json`
+- `providers/comfyui_prompt_bundle.json`
+
+## Project Batch Packaging
+
+```bash
+python -m uv run python -m autocineflow.project_batch ^
+  --input-file scenes.json ^
+  --project-name "Feature Previs" ^
+  --output-dir out\feature_previs ^
+  --config-path D:\Codex\workspace\config\conf
+```
+
+The batch input is a JSON array or an object with a `scenes` array:
+
+```json
+[
+  {
+    "scene_id": "SCENE_A",
+    "description": "A man in black coat faces a woman in red dress across a tavern table.",
+    "num_shots": 5,
+    "emotion_override": "tense"
+  }
+]
+```
+
+The batch exporter writes:
+
+- `project_manifest.json`
+- `project_shotlist.csv`
+- `project_review.md`
+- `scenes/<scene-id>/...` with per-scene delivery assets

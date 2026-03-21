@@ -36,6 +36,8 @@ __all__ = [
     "FramingParams",
     "LightingParams",
     "MotionInstruction",
+    "ProjectPackage",
+    "ProjectSceneInput",
     "RenderJob",
     "RenderPreset",
     "SceneBeat",
@@ -49,6 +51,8 @@ __all__ = [
 
 _LAZY_EXPORTS = {
     "DeliveryShot": ".delivery",
+    "ProjectPackage": ".project_delivery",
+    "ProjectSceneInput": ".project_delivery",
     "RenderJob": ".delivery",
     "RenderPreset": ".delivery",
     "StoryboardPackage": ".delivery",

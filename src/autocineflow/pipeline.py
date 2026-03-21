@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from .delivery import (
     RenderPreset,
@@ -20,6 +20,20 @@ from .delivery import (
 )
 from .director_logic import build_shot, plan_scene_beats
 from .models import SceneContext
+from .project_delivery import (
+    ProjectPackage,
+    ProjectSceneInput,
+    build_project_package,
+    project_manifest_json,
+    project_review_markdown,
+    project_shotlist_csv,
+    write_project_package,
+)
+from .provider_payloads import (
+    automatic1111_bundle_json,
+    comfyui_bundle_json,
+    write_provider_payloads,
+)
 from .prompt_builder import attach_prompts
 from .script_analyzer import analyse_script
 from .spatial_solver import positions_to_controlnet
@@ -237,6 +251,116 @@ class CineFlowPipeline:
             **self.acceptance_report(context),
         }
 
+    def quality_report(
+        self,
+        context: SceneContext,
+        min_score: float = 0.85,
+    ) -> dict[str, Any]:
+        """Return weighted quality metrics and gate decision for a scene."""
+
+        metrics: dict[str, float] = {
+            "axis_consistency": 1.0 if self.validate_axis_consistency(context) else 0.0,
+            "gaze_logic": 1.0 if self.validate_gaze_logic(context) else 0.0,
+            "anchor_specificity": 1.0 if self.validate_anchor_specificity(context) else 0.0,
+            "subject_coverage": 1.0 if self.validate_subject_coverage(context) else 0.0,
+            "cinematic_progression": 1.0 if self.validate_cinematic_progression(context) else 0.0,
+            "prompt_quality": 1.0 if self.validate_prompt_quality(context) else 0.0,
+            "controlnet_range": 1.0 if self.validate_controlnet_range(context) else 0.0,
+            "dialogue_carryover": 1.0 if self.validate_dialogue_carryover(context) else 0.0,
+            "beat_diversity": min(
+                1.0,
+                len({shot.beat_type for shot in context.shot_blocks if shot.beat_type is not None}) / 4.0,
+            ),
+            "shot_type_diversity": min(
+                1.0,
+                len({shot.framing.shot_type for shot in context.shot_blocks}) / 3.0,
+            ),
+        }
+        weights = {
+            "axis_consistency": 0.16,
+            "gaze_logic": 0.12,
+            "anchor_specificity": 0.12,
+            "subject_coverage": 0.08,
+            "cinematic_progression": 0.12,
+            "prompt_quality": 0.10,
+            "controlnet_range": 0.08,
+            "dialogue_carryover": 0.06,
+            "beat_diversity": 0.08,
+            "shot_type_diversity": 0.08,
+        }
+        score = round(sum(metrics[name] * weights[name] for name in weights), 4)
+        issues = [
+            name
+            for name, value in metrics.items()
+            if value < 1.0 and name in {"axis_consistency", "gaze_logic", "anchor_specificity", "cinematic_progression"}
+        ]
+
+        return {
+            "score": score,
+            "min_score": min_score,
+            "passes_gate": score >= min_score and not issues,
+            "metrics": metrics,
+            "critical_issues": issues,
+            "analysis_source": context.analysis_source,
+        }
+
+    def run_with_quality_gate(
+        self,
+        description: str,
+        num_shots: int = 5,
+        scene_id: str = "SCENE_01",
+        use_llm: bool = True,
+        emotion_override: Optional[str] = None,
+        min_score: float = 0.85,
+        max_attempts: int = 3,
+    ) -> tuple[SceneContext, dict[str, Any]]:
+        """Run the pipeline with retry strategies until the scene passes a quality gate."""
+
+        strategies: list[tuple[bool, int, str]] = [(use_llm, num_shots, "requested")]
+        if use_llm:
+            strategies.append((False, num_shots, "rule_based_fallback"))
+        if num_shots < 5:
+            strategies.append((use_llm, 5, "expanded_shot_count"))
+        if use_llm and num_shots < 5:
+            strategies.append((False, 5, "fallback_expanded_shot_count"))
+
+        seen: set[tuple[bool, int, str]] = set()
+        ordered_strategies = []
+        for strategy in strategies:
+            if strategy not in seen:
+                ordered_strategies.append(strategy)
+                seen.add(strategy)
+
+        best_context: SceneContext | None = None
+        best_report: dict[str, Any] | None = None
+        for attempt_index, (attempt_use_llm, attempt_num_shots, strategy_name) in enumerate(
+            ordered_strategies[:max_attempts],
+            start=1,
+        ):
+            context = self.run(
+                description=description,
+                num_shots=attempt_num_shots,
+                scene_id=scene_id,
+                use_llm=attempt_use_llm,
+                emotion_override=emotion_override,
+            )
+            report = self.quality_report(context, min_score=min_score)
+            report = {
+                **report,
+                "attempt": attempt_index,
+                "strategy": strategy_name,
+            }
+
+            if best_report is None or report["score"] > best_report["score"]:
+                best_context = context
+                best_report = report
+
+            if report["passes_gate"]:
+                return context, report
+
+        assert best_context is not None and best_report is not None
+        return best_context, best_report
+
     def build_storyboard_package(
         self,
         context: SceneContext,
@@ -251,6 +375,7 @@ class CineFlowPipeline:
             project_name=project_name,
             render_preset=render_preset,
             readiness_report=self.production_readiness_report(context),
+            quality_report=self.quality_report(context),
             generated_at=generated_at,
         )
 
@@ -288,6 +413,16 @@ class CineFlowPipeline:
 
         return storyboard_review_markdown(package)
 
+    def automatic1111_bundle_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise Automatic1111-style payloads."""
+
+        return automatic1111_bundle_json(package, indent=indent)
+
+    def comfyui_bundle_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise ComfyUI-oriented bundles."""
+
+        return comfyui_bundle_json(package, indent=indent)
+
     def write_delivery_package(
         self,
         package: StoryboardPackage,
@@ -295,4 +430,55 @@ class CineFlowPipeline:
     ) -> dict[str, Path]:
         """Write packaged delivery assets to disk."""
 
-        return write_storyboard_package(package, output_dir)
+        files = write_storyboard_package(package, output_dir)
+        provider_files = write_provider_payloads(package, Path(output_dir) / "providers")
+        return {**files, **provider_files}
+
+    def build_project_package(
+        self,
+        scene_inputs: list[ProjectSceneInput],
+        project_name: str = "Auto-CineFlow Project",
+        use_llm: bool = True,
+        min_score: float = 0.85,
+        max_attempts: int = 3,
+    ) -> ProjectPackage:
+        """Build a project package from multiple scene requests."""
+
+        scene_packages: list[StoryboardPackage] = []
+        for scene in scene_inputs:
+            context, _ = self.run_with_quality_gate(
+                description=scene.description,
+                num_shots=scene.num_shots,
+                scene_id=scene.scene_id,
+                use_llm=use_llm,
+                emotion_override=scene.emotion_override,
+                min_score=min_score,
+                max_attempts=max_attempts,
+            )
+            scene_packages.append(self.build_storyboard_package(context, project_name=project_name))
+
+        return build_project_package(project_name=project_name, scenes=scene_packages)
+
+    def project_manifest_json(self, package: ProjectPackage, indent: int = 2) -> str:
+        """Serialise a project package to JSON."""
+
+        return project_manifest_json(package, indent=indent)
+
+    def project_shotlist_csv(self, package: ProjectPackage) -> str:
+        """Export a flattened multi-scene shot list."""
+
+        return project_shotlist_csv(package)
+
+    def project_review_markdown(self, package: ProjectPackage) -> str:
+        """Export a project-level review markdown document."""
+
+        return project_review_markdown(package)
+
+    def write_project_package(
+        self,
+        package: ProjectPackage,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write a full project package to disk."""
+
+        return write_project_package(package, output_dir)

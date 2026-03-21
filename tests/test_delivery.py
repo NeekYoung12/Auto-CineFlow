@@ -70,6 +70,8 @@ def test_export_package_to_csv_and_json():
     manifest_json = pipeline.storyboard_package_json(package, indent=2)
     render_queue_json = pipeline.render_queue_json(package, indent=2)
     character_bible_json = pipeline.character_bible_json(package, indent=2)
+    automatic1111_json = pipeline.automatic1111_bundle_json(package, indent=2)
+    comfyui_json = pipeline.comfyui_bundle_json(package, indent=2)
     csv_text = pipeline.shotlist_csv(package)
     edl = pipeline.edl_text(package)
     review_markdown = pipeline.storyboard_review_markdown(package)
@@ -77,11 +79,17 @@ def test_export_package_to_csv_and_json():
     manifest = json.loads(manifest_json)
     render_queue = json.loads(render_queue_json)
     character_bible = json.loads(character_bible_json)
+    automatic1111_bundle = json.loads(automatic1111_json)
+    comfyui_bundle = json.loads(comfyui_json)
 
     assert manifest["scene_id"] == "DELIVERY_SCENE"
     assert len(manifest["shots"]) == 5
     assert len(render_queue) == 5
     assert len(character_bible) == 2
+    assert len(automatic1111_bundle) == 5
+    assert len(comfyui_bundle) == 5
+    assert automatic1111_bundle[0]["seed"] == manifest["shots"][0]["render_seed"]
+    assert comfyui_bundle[0]["workflow"]["seed"] == manifest["shots"][0]["render_seed"]
     assert "shot_id,shot_slug,shot_index,beat_type,shot_type" in csv_text
     assert "DELIVERY_SCENE_SH001" in csv_text
     assert "render_seed" in csv_text
@@ -99,15 +107,28 @@ def test_write_delivery_package_creates_output_files():
 
     try:
         written = pipeline.write_delivery_package(package, temp_dir)
-        assert set(written.keys()) == {"manifest", "shotlist", "render_queue", "character_bible", "edl", "review_markdown"}
+        assert set(written.keys()) == {
+            "manifest",
+            "shotlist",
+            "render_queue",
+            "character_bible",
+            "edl",
+            "review_markdown",
+            "automatic1111",
+            "comfyui",
+        }
         assert written["manifest"].exists()
         assert written["shotlist"].exists()
         assert written["render_queue"].exists()
         assert written["character_bible"].exists()
         assert written["edl"].exists()
         assert written["review_markdown"].exists()
+        assert written["automatic1111"].exists()
+        assert written["comfyui"].exists()
         assert json.loads(written["manifest"].read_text(encoding="utf-8"))["scene_id"] == "DELIVERY_SCENE"
         assert len(json.loads(written["character_bible"].read_text(encoding="utf-8"))) == 2
+        assert len(json.loads(written["automatic1111"].read_text(encoding="utf-8"))) == 5
+        assert len(json.loads(written["comfyui"].read_text(encoding="utf-8"))) == 5
         assert "# Delivery Test" in written["review_markdown"].read_text(encoding="utf-8")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

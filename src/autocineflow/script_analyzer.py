@@ -70,7 +70,7 @@ _ENGLISH_ROLE_PATTERN = re.compile(
     r"elegant|tired|nervous|stern|grizzled|hooded|masked|blonde|dark-haired|red-haired|"
     r"grey-haired|gray-haired|well-dressed|disheveled|wounded|smiling|tearful|drunk|dusty)\s+){0,4}"
     r"(?:man|woman|person|figure|bartender|waitress|waiter|stranger|wanderer|soldier|"
-    r"detective|doctor|nurse|teacher|girl|boy|child|guard|officer|chef|musician)\b"
+    r"detective|informant|doctor|nurse|teacher|girl|boy|child|guard|officer|chef|musician)\b"
     r"(?:\s+(?:with|in|wearing|dressed in|holding)\s+"
     r"(?:(?!\b(?:faces?|facing|across|opposite|beside|next|while|and)\b)[A-Za-z-]+\s*){1,6})?",
     re.IGNORECASE,
@@ -138,6 +138,14 @@ def _trim_anchor_tail(candidate: str) -> str:
         flags=re.IGNORECASE,
     )[0]
     trimmed = re.split(r"(?:对坐|对视|站在|看着|望着|旁边)", trimmed, maxsplit=1)[0]
+    trimmed = re.split(
+        r"\b(?:in|at|under|inside|outside)\b\s+(?:a|an|the)?\s*(?:(?:\w+)\s+){0,2}"
+        r"(?:tavern|pub|bar|inn|alley|field|meadow|plain|street|road|crosswalk|"
+        r"forest|woods|office|meeting room|room|bedroom|living room|night|midnight)\b.*",
+        trimmed,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
     trimmed = re.sub(r"^(?:a|an|the)\s+", "", trimmed, flags=re.IGNORECASE)
     return _normalise_spaces(trimmed)
 
