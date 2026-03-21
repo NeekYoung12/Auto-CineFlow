@@ -12,6 +12,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from .delivery import StoryboardPackage, slugify, write_storyboard_package
+from .provider_payloads import write_provider_payloads
+from .render_qa import render_manifest_template_json
 
 
 class ProjectSceneInput(BaseModel):
@@ -195,6 +197,11 @@ def write_project_package(
     for scene in package.scenes:
         scene_dir = scenes_dir / slugify(scene.scene_id, default=scene.scene_id.lower())
         write_storyboard_package(scene, scene_dir)
+        write_provider_payloads(scene, scene_dir / "providers")
+        (scene_dir / "render_manifest_template.json").write_text(
+            render_manifest_template_json(scene, indent=2),
+            encoding="utf-8",
+        )
 
     return {
         "manifest": manifest_path,

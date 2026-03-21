@@ -201,3 +201,22 @@ This writes:
 - `project_change_plan.json`
 - `project_change_review.md`
 - `rerender_queue.json`
+
+## Reuse-Aware Execution Planning
+
+If you also have previous scene export folders with completed render manifests, you can build a reuse-aware execution plan:
+
+```bash
+python -m uv run python -m autocineflow.execution_planner ^
+  --previous-project out\feature_previs_v1\project_manifest.json ^
+  --current-project out\feature_previs_v2\project_manifest.json ^
+  --previous-scenes-dir out\feature_previs_v1\scenes ^
+  --output-dir out\feature_previs_execution
+```
+
+This writes:
+
+- `project_execution_plan.json`
+- `project_execution_review.md`
+- `reuse_manifest.json`
+- `rerender_queue.json`

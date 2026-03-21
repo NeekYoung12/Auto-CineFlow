@@ -25,6 +25,13 @@ from .change_planner import (
     project_change_review_markdown,
     write_project_change_plan,
 )
+from .execution_planner import (
+    ProjectExecutionPlan,
+    build_project_execution_plan,
+    project_execution_plan_json,
+    project_execution_review_markdown,
+    write_project_execution_plan,
+)
 from .director_logic import build_shot, plan_scene_beats
 from .models import SceneContext
 from .project_delivery import (
@@ -566,3 +573,32 @@ class CineFlowPipeline:
         """Write a project change plan to disk."""
 
         return write_project_change_plan(plan, output_dir)
+
+    def build_project_execution_plan(
+        self,
+        previous: ProjectPackage,
+        current: ProjectPackage,
+        previous_scenes_dir: str | Path,
+    ) -> ProjectExecutionPlan:
+        """Build a reuse/rerender execution plan from previous renders."""
+
+        return build_project_execution_plan(previous, current, previous_scenes_dir)
+
+    def project_execution_plan_json(self, plan: ProjectExecutionPlan, indent: int = 2) -> str:
+        """Serialise a project execution plan."""
+
+        return project_execution_plan_json(plan, indent=indent)
+
+    def project_execution_review_markdown(self, plan: ProjectExecutionPlan) -> str:
+        """Export a human-readable execution review document."""
+
+        return project_execution_review_markdown(plan)
+
+    def write_project_execution_plan(
+        self,
+        plan: ProjectExecutionPlan,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write a project execution plan to disk."""
+
+        return write_project_execution_plan(plan, output_dir)

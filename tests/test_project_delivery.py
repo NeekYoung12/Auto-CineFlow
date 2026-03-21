@@ -114,5 +114,7 @@ def test_write_project_package_creates_manifest_and_scene_dirs():
         assert manifest["scene_count"] == 2
         assert (written["scenes_dir"] / "scene-a" / "storyboard_package.json").exists()
         assert (written["scenes_dir"] / "scene-b" / "storyboard_package.json").exists()
+        assert (written["scenes_dir"] / "scene-a" / "render_manifest_template.json").exists()
+        assert (written["scenes_dir"] / "scene-b" / "render_manifest_template.json").exists()
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
