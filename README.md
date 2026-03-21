@@ -184,3 +184,20 @@ The batch exporter writes:
 - `project_shotlist.csv`
 - `project_review.md`
 - `scenes/<scene-id>/...` with per-scene delivery assets
+
+## Incremental Rerender Planning
+
+When you have a previous and current project manifest, you can generate a rerender diff:
+
+```bash
+python -m uv run python -m autocineflow.change_planner ^
+  --previous-project out\feature_previs_v1\project_manifest.json ^
+  --current-project out\feature_previs_v2\project_manifest.json ^
+  --output-dir out\feature_previs_diff
+```
+
+This writes:
+
+- `project_change_plan.json`
+- `project_change_review.md`
+- `rerender_queue.json`

@@ -18,6 +18,13 @@ from .delivery import (
     storyboard_review_markdown,
     write_storyboard_package,
 )
+from .change_planner import (
+    ProjectChangePlan,
+    build_project_change_plan,
+    project_change_plan_json,
+    project_change_review_markdown,
+    write_project_change_plan,
+)
 from .director_logic import build_shot, plan_scene_beats
 from .models import SceneContext
 from .project_delivery import (
@@ -531,3 +538,31 @@ class CineFlowPipeline:
         """Write a full project package to disk."""
 
         return write_project_package(package, output_dir)
+
+    def build_project_change_plan(
+        self,
+        previous: ProjectPackage,
+        current: ProjectPackage,
+    ) -> ProjectChangePlan:
+        """Build an incremental rerender plan between two project packages."""
+
+        return build_project_change_plan(previous, current)
+
+    def project_change_plan_json(self, plan: ProjectChangePlan, indent: int = 2) -> str:
+        """Serialise a project change plan."""
+
+        return project_change_plan_json(plan, indent=indent)
+
+    def project_change_review_markdown(self, plan: ProjectChangePlan) -> str:
+        """Export a human-readable project change review document."""
+
+        return project_change_review_markdown(plan)
+
+    def write_project_change_plan(
+        self,
+        plan: ProjectChangePlan,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write a project change plan to disk."""
+
+        return write_project_change_plan(plan, output_dir)
