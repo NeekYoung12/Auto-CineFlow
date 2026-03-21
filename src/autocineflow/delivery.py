@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from hashlib import sha256
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
@@ -24,6 +25,17 @@ class RenderPreset(BaseModel):
     sampler: str = Field(default="dpmpp_2m")
     steps: int = Field(default=30, ge=1)
     cfg_scale: float = Field(default=6.5, ge=0.0)
+    seed_base: int = Field(default=420000, ge=0)
+
+
+class CharacterBibleEntry(BaseModel):
+    """Reusable continuity entry for each tracked character."""
+
+    char_id: str
+    visual_anchor: str
+    continuity_tag: str
+    preferred_facing: str
+    default_seed: int = Field(..., ge=0)
 
 
 class DeliveryShot(BaseModel):
@@ -41,6 +53,9 @@ class DeliveryShot(BaseModel):
     timeline_in: str
     timeline_out: str
     focal_length_mm: int = Field(..., ge=1)
+    render_seed: int = Field(..., ge=0)
+    continuity_group: str
+    reference_shot_id: str = ""
     axis_side: str
     primary_subjects: list[str] = Field(default_factory=list)
     scene_location: str = ""
@@ -64,6 +79,7 @@ class RenderJob(BaseModel):
     fps: int
     frame_count: int
     duration_seconds: float
+    render_seed: int = Field(..., ge=0)
     prompt: str
     negative_prompt: str
     controlnet_points: list[dict[str, float | str]] = Field(default_factory=list)
@@ -82,6 +98,7 @@ class StoryboardPackage(BaseModel):
     total_duration_seconds: float = Field(..., ge=0.1)
     render_preset: RenderPreset
     readiness_report: dict[str, bool] = Field(default_factory=dict)
+    character_bible: list[CharacterBibleEntry] = Field(default_factory=list)
     shots: list[DeliveryShot] = Field(default_factory=list)
     render_queue: list[RenderJob] = Field(default_factory=list)
 
@@ -111,6 +128,14 @@ def slugify(value: str, default: str = "scene") -> str:
     return slug or default
 
 
+def stable_seed(*parts: str | int) -> int:
+    """Build a deterministic seed from stable identifiers."""
+
+    payload = "::".join(str(part) for part in parts)
+    digest = sha256(payload.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
+
+
 def estimate_shot_duration(shot: ShotBlock) -> float:
     """Estimate editorial duration for a shot."""
 
@@ -135,11 +160,43 @@ def seconds_to_timecode(total_seconds: float, fps: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{frames:02d}"
 
 
+def build_character_bible(
+    context: SceneContext,
+    render_preset: RenderPreset,
+) -> list[CharacterBibleEntry]:
+    """Create a stable character continuity list for the scene."""
+
+    return [
+        CharacterBibleEntry(
+            char_id=character.char_id,
+            visual_anchor=character.visual_anchor,
+            continuity_tag=slugify(f"{context.scene_id}-{character.char_id}-{character.visual_anchor}"),
+            preferred_facing=character.facing.value,
+            default_seed=render_preset.seed_base + stable_seed(context.scene_id, character.char_id),
+        )
+        for character in context.characters
+    ]
+
+
+def infer_reference_shot_id(existing_shots: list[DeliveryShot], shot: ShotBlock) -> str:
+    """Link a shot to the most recent shot covering the same primary subject."""
+
+    subject_set = set(shot.framing.subjects)
+    if not subject_set:
+        return existing_shots[-1].shot_id if existing_shots else ""
+
+    for previous in reversed(existing_shots):
+        if subject_set.intersection(previous.primary_subjects):
+            return previous.shot_id
+    return existing_shots[-1].shot_id if existing_shots else ""
+
+
 def build_delivery_shot(
     context: SceneContext,
     shot: ShotBlock,
     render_preset: RenderPreset,
     start_seconds: float,
+    existing_shots: list[DeliveryShot] | None = None,
 ) -> DeliveryShot:
     """Build a single delivery shot from a pipeline shot block."""
 
@@ -152,6 +209,12 @@ def build_delivery_shot(
     frame_count = max(1, round(duration_seconds * render_preset.fps))
     timeline_in = seconds_to_timecode(start_seconds, render_preset.fps)
     timeline_out = seconds_to_timecode(start_seconds + duration_seconds, render_preset.fps)
+    continuity_group = slugify(
+        "-".join(shot.framing.subjects) if shot.framing.subjects else f"{context.scene_id}-ensemble",
+        default=f"{context.scene_id.lower()}-ensemble",
+    )
+    render_seed = render_preset.seed_base + stable_seed(context.scene_id, shot_code, continuity_group)
+    reference_shot_id = infer_reference_shot_id(existing_shots or [], shot)
 
     return DeliveryShot(
         shot_id=shot_code,
@@ -166,6 +229,9 @@ def build_delivery_shot(
         timeline_in=timeline_in,
         timeline_out=timeline_out,
         focal_length_mm=shot.framing.focal_length_mm,
+        render_seed=render_seed,
+        continuity_group=continuity_group,
+        reference_shot_id=reference_shot_id,
         axis_side=shot.camera_angle.axis_side.value,
         primary_subjects=list(shot.framing.subjects),
         scene_location=shot.scene_location or context.scene_location,
@@ -190,6 +256,7 @@ def build_render_job(delivery_shot: DeliveryShot, render_preset: RenderPreset) -
         fps=render_preset.fps,
         frame_count=delivery_shot.frame_count,
         duration_seconds=delivery_shot.duration_seconds,
+        render_seed=delivery_shot.render_seed,
         prompt=delivery_shot.prompt,
         negative_prompt=delivery_shot.negative_prompt,
         controlnet_points=list(delivery_shot.controlnet_points),
@@ -200,6 +267,8 @@ def build_render_job(delivery_shot: DeliveryShot, render_preset: RenderPreset) -
             "beat_type": delivery_shot.beat_type,
             "shot_type": delivery_shot.shot_type,
             "primary_subjects": list(delivery_shot.primary_subjects),
+            "reference_shot_id": delivery_shot.reference_shot_id,
+            "continuity_group": delivery_shot.continuity_group,
             "axis_side": delivery_shot.axis_side,
             "focal_length_mm": delivery_shot.focal_length_mm,
             "scene_location": delivery_shot.scene_location,
@@ -218,10 +287,17 @@ def build_storyboard_package(
     """Create a production-ready delivery package from a scene context."""
 
     render_preset = render_preset or RenderPreset()
+    character_bible = build_character_bible(context, render_preset)
     delivery_shots: list[DeliveryShot] = []
     elapsed_seconds = 0.0
     for shot in context.shot_blocks:
-        delivery_shot = build_delivery_shot(context, shot, render_preset, start_seconds=elapsed_seconds)
+        delivery_shot = build_delivery_shot(
+            context,
+            shot,
+            render_preset,
+            start_seconds=elapsed_seconds,
+            existing_shots=delivery_shots,
+        )
         delivery_shots.append(delivery_shot)
         elapsed_seconds += delivery_shot.duration_seconds
     render_queue = [build_render_job(shot, render_preset) for shot in delivery_shots]
@@ -237,6 +313,7 @@ def build_storyboard_package(
         total_duration_seconds=total_duration_seconds,
         render_preset=render_preset,
         readiness_report=readiness_report or {},
+        character_bible=character_bible,
         shots=delivery_shots,
         render_queue=render_queue,
     )
@@ -265,6 +342,9 @@ def shotlist_to_csv(package: StoryboardPackage) -> str:
             "timeline_in",
             "timeline_out",
             "focal_length_mm",
+            "render_seed",
+            "continuity_group",
+            "reference_shot_id",
             "axis_side",
             "primary_subjects",
             "scene_location",
@@ -288,6 +368,9 @@ def shotlist_to_csv(package: StoryboardPackage) -> str:
                 "timeline_in": shot.timeline_in,
                 "timeline_out": shot.timeline_out,
                 "focal_length_mm": shot.focal_length_mm,
+                "render_seed": shot.render_seed,
+                "continuity_group": shot.continuity_group,
+                "reference_shot_id": shot.reference_shot_id,
                 "axis_side": shot.axis_side,
                 "primary_subjects": "|".join(shot.primary_subjects),
                 "scene_location": shot.scene_location,
@@ -305,6 +388,16 @@ def render_queue_to_json(package: StoryboardPackage, indent: int = 2) -> str:
 
     return json.dumps(
         [job.model_dump(mode="json") for job in package.render_queue],
+        indent=indent,
+        ensure_ascii=False,
+    )
+
+
+def character_bible_to_json(package: StoryboardPackage, indent: int = 2) -> str:
+    """Serialise the scene character bible to JSON."""
+
+    return json.dumps(
+        [entry.model_dump(mode="json") for entry in package.character_bible],
         indent=indent,
         ensure_ascii=False,
     )
@@ -336,17 +429,20 @@ def write_storyboard_package(
     manifest_path = target_dir / "storyboard_package.json"
     shotlist_path = target_dir / "shotlist.csv"
     render_queue_path = target_dir / "render_queue.json"
+    character_bible_path = target_dir / "character_bible.json"
     edl_path = target_dir / "timeline.edl"
 
     manifest_path.write_text(package_to_json(package, indent=2), encoding="utf-8")
     shotlist_path.write_text(shotlist_to_csv(package), encoding="utf-8", newline="")
     render_queue_path.write_text(render_queue_to_json(package, indent=2), encoding="utf-8")
+    character_bible_path.write_text(character_bible_to_json(package, indent=2), encoding="utf-8")
     edl_path.write_text(edl_text(package), encoding="utf-8")
 
     return {
         "manifest": manifest_path,
         "shotlist": shotlist_path,
         "render_queue": render_queue_path,
+        "character_bible": character_bible_path,
         "edl": edl_path,
     }
 

@@ -77,9 +77,13 @@ Each packaged shot includes:
 - stable `shot_id` such as `SCENE_01_SH001`
 - `timeline_in` / `timeline_out` SMPTE-style timecodes
 - editorial duration and frame count
+- deterministic `render_seed` for reproducible generation
+- `reference_shot_id` and `continuity_group` for continuity chaining
 - render prompt and negative prompt
 - ControlNet-compatible points
 - staging and nose-room notes
+
+The package also includes a `character_bible` with per-character continuity tags and default seeds.
 
 ## Validation
 
@@ -124,4 +128,5 @@ This writes:
 - `storyboard_package.json`
 - `shotlist.csv`
 - `render_queue.json`
+- `character_bible.json`
 - `timeline.edl`

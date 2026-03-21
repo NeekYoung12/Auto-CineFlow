@@ -10,6 +10,7 @@ from .delivery import (
     RenderPreset,
     StoryboardPackage,
     build_storyboard_package,
+    character_bible_to_json,
     edl_text,
     package_to_json,
     render_queue_to_json,
@@ -270,6 +271,11 @@ class CineFlowPipeline:
         """Serialise the packaged render queue to JSON."""
 
         return render_queue_to_json(package, indent=indent)
+
+    def character_bible_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise the packaged character bible to JSON."""
+
+        return character_bible_to_json(package, indent=indent)
 
     def edl_text(self, package: StoryboardPackage) -> str:
         """Export a simple editorial decision list."""
