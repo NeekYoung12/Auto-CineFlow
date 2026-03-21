@@ -87,6 +87,7 @@ Each packaged shot includes:
 The package also includes a `character_bible` with per-character continuity tags and default seeds.
 For human review, the exporter also writes a `storyboard_review.md` document.
 Provider-oriented files are also written for downstream generators.
+It also writes a `render_manifest_template.json` file for downstream render tracking and QA.
 
 ## Validation
 
@@ -136,6 +137,23 @@ This writes:
 - `storyboard_review.md`
 - `providers/automatic1111_txt2img.json`
 - `providers/comfyui_prompt_bundle.json`
+- `render_manifest_template.json`
+
+## Render QA
+
+After a renderer fills the manifest with actual output metadata, run:
+
+```bash
+python -m uv run python -m autocineflow.render_qa ^
+  --package-file out\scene_10\storyboard_package.json ^
+  --manifest-file out\scene_10\render_manifest_template.json ^
+  --output-dir out\scene_10\qa
+```
+
+This writes:
+
+- `render_qa_report.json`
+- `render_qa_review.md`
 
 ## Project Batch Packaging
 

@@ -116,6 +116,7 @@ def test_write_delivery_package_creates_output_files():
             "review_markdown",
             "automatic1111",
             "comfyui",
+            "render_manifest_template",
         }
         assert written["manifest"].exists()
         assert written["shotlist"].exists()
@@ -125,10 +126,12 @@ def test_write_delivery_package_creates_output_files():
         assert written["review_markdown"].exists()
         assert written["automatic1111"].exists()
         assert written["comfyui"].exists()
+        assert written["render_manifest_template"].exists()
         assert json.loads(written["manifest"].read_text(encoding="utf-8"))["scene_id"] == "DELIVERY_SCENE"
         assert len(json.loads(written["character_bible"].read_text(encoding="utf-8"))) == 2
         assert len(json.loads(written["automatic1111"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["comfyui"].read_text(encoding="utf-8"))) == 5
+        assert len(json.loads(written["render_manifest_template"].read_text(encoding="utf-8"))) == 5
         assert "# Delivery Test" in written["review_markdown"].read_text(encoding="utf-8")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

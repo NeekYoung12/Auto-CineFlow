@@ -34,6 +34,16 @@ from .provider_payloads import (
     comfyui_bundle_json,
     write_provider_payloads,
 )
+from .render_qa import (
+    RenderExpectation,
+    RenderQAReport,
+    build_render_manifest_template,
+    render_manifest_template_json,
+    render_qa_report,
+    render_qa_report_json,
+    render_qa_review_markdown,
+    write_render_qa_report,
+)
 from .prompt_builder import attach_prompts
 from .script_analyzer import analyse_script
 from .spatial_solver import positions_to_controlnet
@@ -423,6 +433,31 @@ class CineFlowPipeline:
 
         return comfyui_bundle_json(package, indent=indent)
 
+    def render_manifest_template_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise the expected render manifest template."""
+
+        return render_manifest_template_json(package, indent=indent)
+
+    def render_qa_report(
+        self,
+        package: StoryboardPackage,
+        manifest: list[RenderExpectation],
+        min_score: float = 0.9,
+    ) -> RenderQAReport:
+        """Evaluate a render manifest against storyboard expectations."""
+
+        return render_qa_report(package, manifest, min_score=min_score)
+
+    def render_qa_report_json(self, report: RenderQAReport, indent: int = 2) -> str:
+        """Serialise a render QA report."""
+
+        return render_qa_report_json(report, indent=indent)
+
+    def render_qa_review_markdown(self, report: RenderQAReport) -> str:
+        """Export a human-readable render QA review document."""
+
+        return render_qa_review_markdown(report)
+
     def write_delivery_package(
         self,
         package: StoryboardPackage,
@@ -432,7 +467,21 @@ class CineFlowPipeline:
 
         files = write_storyboard_package(package, output_dir)
         provider_files = write_provider_payloads(package, Path(output_dir) / "providers")
-        return {**files, **provider_files}
+        render_manifest_path = Path(output_dir) / "render_manifest_template.json"
+        render_manifest_path.write_text(
+            self.render_manifest_template_json(package, indent=2),
+            encoding="utf-8",
+        )
+        return {**files, **provider_files, "render_manifest_template": render_manifest_path}
+
+    def write_render_qa_report(
+        self,
+        report: RenderQAReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write render QA outputs to disk."""
+
+        return write_render_qa_report(report, output_dir)
 
     def build_project_package(
         self,
