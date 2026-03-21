@@ -72,6 +72,26 @@ from .render_qa import (
     render_qa_review_markdown,
     write_render_qa_report,
 )
+from .submission import (
+    SubmissionBackend,
+    SubmissionBatch,
+    SubmissionJob,
+    SubmissionProvider,
+    SubmissionTarget,
+    build_submission_jobs_from_execution_plan,
+    build_submission_jobs_from_package,
+    submission_batch_json,
+    submission_batch_markdown,
+    submit_jobs,
+    write_submission_batch,
+)
+from .submission_monitor import (
+    SubmissionMonitorReport,
+    monitor_filesystem_submission_batch,
+    submission_monitor_markdown,
+    submission_monitor_report_json,
+    write_submission_monitor_report,
+)
 from .prompt_builder import attach_prompts
 from .script_analyzer import analyse_script
 from .spatial_solver import positions_to_controlnet
@@ -674,3 +694,79 @@ class CineFlowPipeline:
         """Write project dashboard assets to disk."""
 
         return write_project_dashboard(dashboard, output_dir)
+
+    def build_submission_jobs_from_package(
+        self,
+        package: StoryboardPackage,
+        provider: SubmissionProvider = SubmissionProvider.GENERIC,
+    ) -> list[SubmissionJob]:
+        """Build submit-ready jobs from a storyboard package."""
+
+        return build_submission_jobs_from_package(package, provider=provider)
+
+    def build_submission_jobs_from_execution_plan(
+        self,
+        plan: ProjectExecutionPlan,
+        provider: SubmissionProvider = SubmissionProvider.GENERIC,
+    ) -> list[SubmissionJob]:
+        """Build submit-ready jobs from an execution plan."""
+
+        return build_submission_jobs_from_execution_plan(plan, provider=provider)
+
+    def submit_jobs(
+        self,
+        jobs: list[SubmissionJob],
+        target: SubmissionTarget,
+        source_type: str,
+        source_id: str,
+    ) -> SubmissionBatch:
+        """Submit jobs using the selected backend."""
+
+        return submit_jobs(jobs, target, source_type=source_type, source_id=source_id)
+
+    def submission_batch_json(self, batch: SubmissionBatch, indent: int = 2) -> str:
+        """Serialise a submission batch."""
+
+        return submission_batch_json(batch, indent=indent)
+
+    def submission_batch_markdown(self, batch: SubmissionBatch) -> str:
+        """Export a human-readable submission batch."""
+
+        return submission_batch_markdown(batch)
+
+    def write_submission_batch(
+        self,
+        batch: SubmissionBatch,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write submission batch outputs to disk."""
+
+        return write_submission_batch(batch, output_dir)
+
+    def monitor_filesystem_submission_batch(
+        self,
+        batch: SubmissionBatch,
+        spool_dir: str | Path,
+    ) -> SubmissionMonitorReport:
+        """Inspect a filesystem spool for the current state of a submission batch."""
+
+        return monitor_filesystem_submission_batch(batch, spool_dir)
+
+    def submission_monitor_report_json(self, report: SubmissionMonitorReport, indent: int = 2) -> str:
+        """Serialise a submission monitor report."""
+
+        return submission_monitor_report_json(report, indent=indent)
+
+    def submission_monitor_markdown(self, report: SubmissionMonitorReport) -> str:
+        """Export a human-readable submission monitor report."""
+
+        return submission_monitor_markdown(report)
+
+    def write_submission_monitor_report(
+        self,
+        report: SubmissionMonitorReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write submission monitor outputs to disk."""
+
+        return write_submission_monitor_report(report, output_dir)

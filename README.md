@@ -254,3 +254,46 @@ This writes:
 
 - `project_dashboard.json`
 - `project_dashboard.md`
+
+## Task Submission
+
+To turn a scene package into submit-ready render tasks and queue them to a local spool:
+
+```bash
+python -m uv run python -m autocineflow.submission ^
+  --package-file out\scene_10\storyboard_package.json ^
+  --provider automatic1111 ^
+  --backend filesystem ^
+  --spool-dir out\submission_spool ^
+  --output-dir out\submission_records
+```
+
+For project execution plans you can submit only the ordered rerender queue:
+
+```bash
+python -m uv run python -m autocineflow.submission ^
+  --execution-plan-file out\feature_previs_execution\project_execution_plan.json ^
+  --backend dry_run ^
+  --output-dir out\submission_preview
+```
+
+This writes:
+
+- `submission_batch.json`
+- `submission_batch.md`
+
+## Submission Monitoring
+
+For filesystem-backed queues you can monitor batch progress:
+
+```bash
+python -m uv run python -m autocineflow.submission_monitor ^
+  --batch-file out\submission_records\submission_batch.json ^
+  --spool-dir out\submission_spool ^
+  --output-dir out\submission_monitor
+```
+
+This writes:
+
+- `submission_monitor_report.json`
+- `submission_monitor_report.md`
