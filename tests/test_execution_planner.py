@@ -68,6 +68,7 @@ def test_execution_plan_reuses_valid_previous_renders():
         plan = pipeline.build_project_execution_plan(previous, current, previous_files["scenes_dir"])
         assert len(plan.reuse_manifest) == 5
         assert len(plan.rerender_queue) == 0
+        assert len(plan.ordered_rerender_queue) == 0
         assert all(item["scene_id"] == "SCENE_A" for item in plan.reuse_manifest)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -91,6 +92,8 @@ def test_execution_plan_rerenders_changed_shots():
 
         plan = pipeline.build_project_execution_plan(previous, current, previous_files["scenes_dir"])
         assert len(plan.rerender_queue) > 0
+        assert len(plan.ordered_rerender_queue) == len(plan.rerender_queue)
+        assert [job["execution_order"] for job in plan.ordered_rerender_queue] == list(range(1, len(plan.ordered_rerender_queue) + 1))
         assert any(decision.decision.value == "RERENDER" for decision in plan.decisions)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -114,11 +117,12 @@ def test_write_project_execution_plan_creates_outputs():
         plan = pipeline.build_project_execution_plan(previous, current, previous_files["scenes_dir"])
 
         files = pipeline.write_project_execution_plan(plan, temp_dir / "execution")
-        assert set(files.keys()) == {"plan_json", "review_markdown", "reuse_manifest", "rerender_queue"}
+        assert set(files.keys()) == {"plan_json", "review_markdown", "reuse_manifest", "rerender_queue", "ordered_rerender_queue"}
         assert files["plan_json"].exists()
         assert files["review_markdown"].exists()
         assert files["reuse_manifest"].exists()
         assert files["rerender_queue"].exists()
+        assert files["ordered_rerender_queue"].exists()
         payload = json.loads(files["plan_json"].read_text(encoding="utf-8"))
         assert payload["current_project_name"] == "Execution Project"
     finally:

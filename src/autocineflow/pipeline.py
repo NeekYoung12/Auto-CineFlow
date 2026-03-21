@@ -43,6 +43,20 @@ from .project_delivery import (
     project_shotlist_csv,
     write_project_package,
 )
+from .project_render_qa import (
+    ProjectRenderQAReport,
+    build_project_render_qa_report,
+    project_render_qa_report_json,
+    project_render_qa_review_markdown,
+    write_project_render_qa_report,
+)
+from .project_dashboard import (
+    ProjectDashboard,
+    build_project_dashboard,
+    project_dashboard_json,
+    project_dashboard_markdown,
+    write_project_dashboard,
+)
 from .provider_payloads import (
     automatic1111_bundle_json,
     comfyui_bundle_json,
@@ -602,3 +616,61 @@ class CineFlowPipeline:
         """Write a project execution plan to disk."""
 
         return write_project_execution_plan(plan, output_dir)
+
+    def build_project_render_qa_report(
+        self,
+        project: ProjectPackage,
+        scenes_dir: str | Path,
+        min_score: float = 0.9,
+    ) -> ProjectRenderQAReport:
+        """Aggregate render QA across a project."""
+
+        return build_project_render_qa_report(project, scenes_dir, min_score=min_score)
+
+    def project_render_qa_report_json(self, report: ProjectRenderQAReport, indent: int = 2) -> str:
+        """Serialise a project render QA report."""
+
+        return project_render_qa_report_json(report, indent=indent)
+
+    def project_render_qa_review_markdown(self, report: ProjectRenderQAReport) -> str:
+        """Export a human-readable project render QA report."""
+
+        return project_render_qa_review_markdown(report)
+
+    def write_project_render_qa_report(
+        self,
+        report: ProjectRenderQAReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write a project render QA report to disk."""
+
+        return write_project_render_qa_report(report, output_dir)
+
+    def build_project_dashboard(
+        self,
+        project: ProjectPackage,
+        render_qa: ProjectRenderQAReport | None = None,
+        execution_plan: ProjectExecutionPlan | None = None,
+    ) -> ProjectDashboard:
+        """Build a unified project dashboard."""
+
+        return build_project_dashboard(project, render_qa=render_qa, execution_plan=execution_plan)
+
+    def project_dashboard_json(self, dashboard: ProjectDashboard, indent: int = 2) -> str:
+        """Serialise a project dashboard."""
+
+        return project_dashboard_json(dashboard, indent=indent)
+
+    def project_dashboard_markdown(self, dashboard: ProjectDashboard) -> str:
+        """Export a human-readable project dashboard."""
+
+        return project_dashboard_markdown(dashboard)
+
+    def write_project_dashboard(
+        self,
+        dashboard: ProjectDashboard,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write project dashboard assets to disk."""
+
+        return write_project_dashboard(dashboard, output_dir)

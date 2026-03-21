@@ -57,6 +57,7 @@ class ProjectExecutionPlan(BaseModel):
     decisions: list[ShotExecutionRecord] = Field(default_factory=list)
     reuse_manifest: list[dict] = Field(default_factory=list)
     rerender_queue: list[dict] = Field(default_factory=list)
+    ordered_rerender_queue: list[dict] = Field(default_factory=list)
     change_plan: ProjectChangePlan
 
 
@@ -186,6 +187,8 @@ def build_project_execution_plan(
 
         scene_summaries.append(summary)
 
+    ordered_rerender_queue = order_rerender_queue(rerender_queue)
+
     return ProjectExecutionPlan(
         generated_at=datetime.now(timezone.utc).isoformat(),
         previous_project_name=previous.project_name,
@@ -194,8 +197,51 @@ def build_project_execution_plan(
         decisions=decisions,
         reuse_manifest=reuse_manifest,
         rerender_queue=rerender_queue,
+        ordered_rerender_queue=ordered_rerender_queue,
         change_plan=change_plan,
     )
+
+
+def order_rerender_queue(rerender_queue: list[dict]) -> list[dict]:
+    """Topologically order rerender jobs by in-scene reference shot dependencies."""
+
+    jobs_by_shot = {job["shot_id"]: dict(job) for job in rerender_queue}
+    dependency_map: dict[str, set[str]] = {}
+    for shot_id, job in jobs_by_shot.items():
+        metadata = job.get("metadata", {})
+        reference_shot_id = metadata.get("reference_shot_id", "")
+        deps = {reference_shot_id} if reference_shot_id in jobs_by_shot else set()
+        dependency_map[shot_id] = deps
+
+    ordered: list[dict] = []
+    available = sorted(shot_id for shot_id, deps in dependency_map.items() if not deps)
+    processed: set[str] = set()
+
+    while available:
+        shot_id = available.pop(0)
+        if shot_id in processed:
+            continue
+        processed.add(shot_id)
+        job = dict(jobs_by_shot[shot_id])
+        job["execution_order"] = len(ordered) + 1
+        ordered.append(job)
+
+        for candidate, deps in dependency_map.items():
+            if shot_id in deps:
+                deps.remove(shot_id)
+                if not deps and candidate not in processed:
+                    available.append(candidate)
+        available.sort()
+
+    # Fallback for cycles or malformed references.
+    for shot_id in sorted(jobs_by_shot):
+        if shot_id in processed:
+            continue
+        job = dict(jobs_by_shot[shot_id])
+        job["execution_order"] = len(ordered) + 1
+        ordered.append(job)
+
+    return ordered
 
 
 def project_execution_plan_json(plan: ProjectExecutionPlan, indent: int = 2) -> str:
@@ -214,6 +260,7 @@ def project_execution_review_markdown(plan: ProjectExecutionPlan) -> str:
         f"- Current Project: `{plan.current_project_name}`",
         f"- Reuse Count: `{len(plan.reuse_manifest)}`",
         f"- Rerender Count: `{len(plan.rerender_queue)}`",
+        f"- Ordered Rerender Count: `{len(plan.ordered_rerender_queue)}`",
         "",
         "## Scene Summary",
         "",
@@ -245,16 +292,19 @@ def write_project_execution_plan(
     review_path = target_dir / "project_execution_review.md"
     reuse_path = target_dir / "reuse_manifest.json"
     rerender_path = target_dir / "rerender_queue.json"
+    ordered_rerender_path = target_dir / "ordered_rerender_queue.json"
 
     plan_path.write_text(project_execution_plan_json(plan, indent=2), encoding="utf-8")
     review_path.write_text(project_execution_review_markdown(plan), encoding="utf-8")
     reuse_path.write_text(json.dumps(plan.reuse_manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     rerender_path.write_text(json.dumps(plan.rerender_queue, indent=2, ensure_ascii=False), encoding="utf-8")
+    ordered_rerender_path.write_text(json.dumps(plan.ordered_rerender_queue, indent=2, ensure_ascii=False), encoding="utf-8")
     return {
         "plan_json": plan_path,
         "review_markdown": review_path,
         "reuse_manifest": reuse_path,
         "rerender_queue": rerender_path,
+        "ordered_rerender_queue": ordered_rerender_path,
     }
 
 
@@ -282,6 +332,7 @@ def main() -> int:
                 "current_project_name": plan.current_project_name,
                 "reuse_count": len(plan.reuse_manifest),
                 "rerender_count": len(plan.rerender_queue),
+                "ordered_rerender_count": len(plan.ordered_rerender_queue),
                 "output_files": {key: str(value) for key, value in output_files.items()},
             },
             ensure_ascii=False,

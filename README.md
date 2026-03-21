@@ -155,6 +155,22 @@ This writes:
 - `render_qa_report.json`
 - `render_qa_review.md`
 
+## Project Render QA
+
+To aggregate render QA across all scene folders in a project:
+
+```bash
+python -m uv run python -m autocineflow.project_render_qa ^
+  --project-file out\feature_previs\project_manifest.json ^
+  --scenes-dir out\feature_previs\scenes ^
+  --output-dir out\feature_previs\project_qa
+```
+
+This writes:
+
+- `project_render_qa_report.json`
+- `project_render_qa_review.md`
+
 ## Project Batch Packaging
 
 ```bash
@@ -220,3 +236,21 @@ This writes:
 - `project_execution_review.md`
 - `reuse_manifest.json`
 - `rerender_queue.json`
+- `ordered_rerender_queue.json`
+
+## Project Dashboard
+
+To generate one top-level dashboard from project metadata, project render QA, and execution planning:
+
+```bash
+python -m uv run python -m autocineflow.project_dashboard ^
+  --project-file out\feature_previs\project_manifest.json ^
+  --render-qa-file out\feature_previs\project_qa\project_render_qa_report.json ^
+  --execution-plan-file out\feature_previs_execution\project_execution_plan.json ^
+  --output-dir out\feature_previs_dashboard
+```
+
+This writes:
+
+- `project_dashboard.json`
+- `project_dashboard.md`
