@@ -1,6 +1,6 @@
 """Pydantic data models for Auto-CineFlow.
 
-Defines the structured output schema (Shot_Block) and supporting types
+Defines the structured output schema (ShotBlock) and supporting types
 for the cinematic storyboard parameter generator.
 """
 
@@ -29,11 +29,11 @@ class CharacterFacing(str, Enum):
 class ShotType(str, Enum):
     """Standard cinematographic shot types (framing sizes)."""
 
-    MASTER_SHOT = "MASTER_SHOT"       # Extreme wide / establishing shot
-    MEDIUM_SHOT = "MEDIUM_SHOT"       # Waist-up
-    MCU = "MCU"                        # Medium close-up (chest/shoulders)
-    CLOSE_UP = "CLOSE_UP"             # Face fills most of frame
-    OVER_SHOULDER = "OVER_SHOULDER"   # Over-the-shoulder two-shot
+    MASTER_SHOT = "MASTER_SHOT"
+    MEDIUM_SHOT = "MEDIUM_SHOT"
+    MCU = "MCU"
+    CLOSE_UP = "CLOSE_UP"
+    OVER_SHOULDER = "OVER_SHOULDER"
 
 
 class CameraAngleType(str, Enum):
@@ -52,16 +52,37 @@ class AxisSide(str, Enum):
     RIGHT = "RIGHT"
 
 
+class BeatType(str, Enum):
+    """Narrative beat labels used to plan a shot sequence."""
+
+    ESTABLISH = "ESTABLISH"
+    RELATION = "RELATION"
+    BUILD = "BUILD"
+    ESCALATION = "ESCALATION"
+    REACTION = "REACTION"
+    RESOLUTION = "RESOLUTION"
+
+
 # ---------------------------------------------------------------------------
 # Sub-models
 # ---------------------------------------------------------------------------
 
 
 class Position(BaseModel):
-    """Normalised 2-D canvas position (range 0.0–1.0 on each axis)."""
+    """Normalised 2-D canvas position (range 0.0-1.0 on each axis)."""
 
     x: float = Field(..., ge=0.0, le=1.0, description="Horizontal position (0=left, 1=right)")
     y: float = Field(..., ge=0.0, le=1.0, description="Vertical position (0=top, 1=bottom)")
+
+
+class DialogueLine(BaseModel):
+    """Single dialogue fragment extracted from the scene description."""
+
+    text: str = Field(..., description="Dialogue content without surrounding quotation marks")
+    speaker_hint: Optional[str] = Field(
+        default=None,
+        description="Best-effort speaker hint when the analyser can infer one",
+    )
 
 
 class Character(BaseModel):
@@ -171,6 +192,49 @@ class MotionInstruction(BaseModel):
     )
 
 
+class CompositionHint(BaseModel):
+    """Composition and staging guidance for downstream renderers."""
+
+    focus_point: Optional[Position] = Field(
+        default=None,
+        description="Primary attention point on the 0-1 canvas",
+    )
+    nose_room: str = Field(
+        default="",
+        description="Short note describing how eyeline room is preserved",
+    )
+    staging: str = Field(
+        default="",
+        description="Blocking or staging note for the shot",
+    )
+
+
+class CameraPlacement(BaseModel):
+    """Abstract scene-space camera placement used for geometry validation."""
+
+    x: float = Field(..., description="Camera x position in scene space")
+    y: float = Field(..., description="Camera y position in scene space")
+    distance: float = Field(..., ge=0.0, description="Distance from the axis origin")
+
+
+class SceneBeat(BaseModel):
+    """Narrative beat planned before concrete shots are generated."""
+
+    beat_index: int = Field(..., ge=0)
+    beat_type: BeatType
+    emotion: str = Field(default="neutral")
+    intensity: float = Field(..., ge=0.0, le=1.0)
+    purpose: str = Field(default="", description="Human-readable story purpose for the beat")
+    focus_char_id: Optional[str] = Field(
+        default=None,
+        description="Primary character emphasis for this beat, if any",
+    )
+    shot_type_hint: Optional[ShotType] = Field(
+        default=None,
+        description="Suggested shot type picked by the planner",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level Shot Block
 # ---------------------------------------------------------------------------
@@ -200,6 +264,34 @@ class ShotBlock(BaseModel):
         default="",
         description="SD negative prompt",
     )
+    beat_type: Optional[BeatType] = Field(
+        default=None,
+        description="Narrative beat category for this shot",
+    )
+    story_purpose: str = Field(
+        default="",
+        description="Short story-level reason this shot exists",
+    )
+    composition: Optional[CompositionHint] = Field(
+        default=None,
+        description="Composition and staging guidance",
+    )
+    camera_position: Optional[CameraPlacement] = Field(
+        default=None,
+        description="Scene-space camera placement used for axis validation",
+    )
+    controlnet_points: list[dict[str, float | str]] = Field(
+        default_factory=list,
+        description="ControlNet-compatible points derived from character positions",
+    )
+    scene_location: str = Field(
+        default="",
+        description="Best-effort scene location tag",
+    )
+    scene_tags: list[str] = Field(
+        default_factory=list,
+        description="Environment or tone tags copied from the analysed scene",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +313,30 @@ class SceneContext(BaseModel):
     detected_emotion: str = Field(
         default="neutral",
         description="Primary emotion keyword detected in this scene",
+    )
+    dialogue: list[DialogueLine] = Field(
+        default_factory=list,
+        description="Dialogue fragments extracted from the source description",
+    )
+    scene_location: str = Field(
+        default="",
+        description="Best-effort location tag such as 'tavern' or 'field'",
+    )
+    scene_tags: list[str] = Field(
+        default_factory=list,
+        description="Supplementary scene descriptors for prompts",
+    )
+    beats: list[SceneBeat] = Field(
+        default_factory=list,
+        description="Planned narrative beats for the generated shot sequence",
+    )
+    primary_focus_char_id: Optional[str] = Field(
+        default=None,
+        description="Character currently driving the scene emphasis",
+    )
+    analysis_source: str = Field(
+        default="rule_based",
+        description="How the scene was parsed: rule_based or llm",
     )
 
 

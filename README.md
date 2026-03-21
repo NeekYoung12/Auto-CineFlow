@@ -1,34 +1,41 @@
 # Auto-CineFlow
 
-An LLM-driven cinematic storyboard parameter generator. Converts a 1–2 person scene description into a structured JSON instruction set (per-shot `ShotBlock`) that can drive AI image/video workflows.
+Auto-CineFlow is an LLM-driven cinematic storyboard generator for 1-2 character scenes. It converts scene descriptions into structured shot plans, render-ready prompts, geometry-safe blocking, and downstream delivery assets for image, video, and editorial workflows.
 
-## Features
+## Core Capabilities
 
-* **[REQ-01] Character State Machine** – maintains character IDs, visual anchors and canvas positions across the entire shot sequence
-* **[REQ-02] 180° Axis Guard** – vector-based cross-product check prevents axis crossing between consecutive shots
-* **[REQ-03] Shot Template Library** – Master Shot (24 mm), Medium Shot (35 mm), MCU (50 mm), Close-Up (85 mm), Over-Shoulder (35 mm)
-* **[REQ-04] Semantic-Parameter Mapping** – emotion keywords (`angry`, `tense`, …) are mapped to concrete image parameters (`contrast`, `saturation`, camera angle)
+- Stable character state with immutable `CHAR_A` / `CHAR_B` visual anchors
+- 180-degree axis protection with scene-space camera placement
+- Shot planning across `MASTER_SHOT`, `MEDIUM_SHOT`, `MCU`, `CLOSE_UP`, and `OVER_SHOULDER`
+- Semantic mapping from scene emotion to lighting, motion, and escalation
+- Narrative beat planning across `ESTABLISH`, `RELATION`, `BUILD`, `ESCALATION`, `REACTION`, and `RESOLUTION`
+- English and Chinese scene parsing with dialogue extraction
+- Prompt assembly for Stable Diffusion-style image/video workflows
+- Delivery packaging to manifest JSON, shot list CSV, render queue JSON, and editorial EDL
+- Acceptance and production-readiness reports
 
 ## Architecture
 
-Pipe-and-Filter pipeline:
-
-```
-[Parser Filter]  →  [Director Filter]  →  [Geometry Filter]  →  [Formatter Filter]
-script_analyzer     director_logic         spatial_solver          prompt_builder
+```text
+[Parser Filter]  ->  [Director Filter]  ->  [Geometry Filter]  ->  [Formatter Filter]  ->  [Delivery Layer]
+script_analyzer       director_logic         spatial_solver          prompt_builder         delivery
 ```
 
-## Installation
+## Setup With uv
 
 ```bash
-pip install -e ".[dev]"
+python -m uv venv .venv
+python -m uv sync --extra dev
 ```
 
-Optionally add your OpenAI API key for LLM-backed script analysis:
+LLM-backed parsing can resolve credentials from:
 
-```bash
-export OPENAI_API_KEY=sk-...
-```
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- an explicit `config_path`
+- a sibling workspace config file such as `../config/conf`
+
+The loader normalizes common gateway URLs to an OpenAI-compatible `/v1` endpoint automatically.
 
 ## Quick Start
 
@@ -37,49 +44,84 @@ from autocineflow.pipeline import CineFlowPipeline
 
 pipeline = CineFlowPipeline()
 
-# Use use_llm=False for fully offline / rule-based analysis
 ctx = pipeline.run(
-    description="Two people sit facing each other in a tavern, tension rising.",
+    description=(
+        "A man in black coat faces a woman in red dress across a tavern table. "
+        "He suddenly slams the glass down and erupts in anger."
+    ),
     num_shots=5,
-    use_llm=False,          # set True to call GPT-4o
-    emotion_override="tense",
+    use_llm=False,
 )
 
-# Serialise the full scene to JSON
 print(pipeline.to_json(ctx, indent=2))
-
-# Get ControlNet-compatible coordinates for the final shot
 print(pipeline.controlnet_coords(ctx))
-
-# Verify acceptance criteria
-assert pipeline.validate_axis_consistency(ctx)          # axis_side constant across shots
-assert pipeline.validate_visual_anchor_consistency(ctx) # character descriptions identical
+print(pipeline.acceptance_report(ctx))
+print(pipeline.production_readiness_report(ctx))
 ```
 
-## Output Schema
+## Delivery Package
 
-Each `ShotBlock` in the JSON contains:
+```python
+package = pipeline.build_storyboard_package(ctx, project_name="Feature Previs")
 
-| Field | Description |
-|-------|-------------|
-| `framing` | `shot_type`, `focal_length_mm`, `subjects` |
-| `camera_angle` | `angle_type`, `axis_side`, `tilt_degrees` |
-| `lighting` | `contrast`, `saturation`, `mood` |
-| `motion_instruction` | `motion_type`, `intensity` |
-| `characters` | `char_id`, `visual_anchor`, `pos` (x/y ∈ [0,1]), `facing` |
-| `sd_prompt` | Ready-to-use Stable Diffusion positive prompt |
-| `negative_prompt` | SD negative prompt |
+print(pipeline.storyboard_package_json(package, indent=2))
+print(pipeline.shotlist_csv(package))
+print(pipeline.render_queue_json(package, indent=2))
+print(pipeline.edl_text(package))
 
-## Running Tests
+pipeline.write_delivery_package(package, "out/feature_previs_scene_01")
+```
+
+Each packaged shot includes:
+
+- stable `shot_id` such as `SCENE_01_SH001`
+- `timeline_in` / `timeline_out` SMPTE-style timecodes
+- editorial duration and frame count
+- render prompt and negative prompt
+- ControlNet-compatible points
+- staging and nose-room notes
+
+## Validation
+
+```python
+report = pipeline.acceptance_report(ctx)
+assert report["logic_axis_consistency"]
+assert report["logic_gaze_direction"]
+assert report["data_required_fields"]
+assert report["data_visual_anchor_consistency"]
+assert report["interface_prompt_quality"]
+assert report["interface_controlnet_coords"]
+
+production = pipeline.production_readiness_report(ctx)
+assert all(production.values())
+```
+
+## Run Tests
 
 ```bash
-pytest
+python -m uv run pytest
 ```
 
-All 83 tests cover:
+## Run Online Production Evaluation
 
-* Pydantic model validation and emotion matrix values
-* 180° axis cross-product geometry
-* Director logic (shot selection, axis enforcement, emotion mapping)
-* Prompt builder token generation
-* End-to-end pipeline acceptance criteria (axis consistency, gaze logic, data completeness, JSON output)
+```bash
+python -m uv run python -m autocineflow.production_eval --config-path D:\Codex\workspace\config\conf --fail-on-readiness
+```
+
+## Package A Scene From The CLI
+
+```bash
+python -m uv run python -m autocineflow.delivery ^
+  --description "A detective in a rain-soaked trench coat faces a wounded informant in a neon alley." ^
+  --scene-id SCENE_07 ^
+  --project-name "Feature Previs" ^
+  --output-dir out\scene_07 ^
+  --config-path D:\Codex\workspace\config\conf
+```
+
+This writes:
+
+- `storyboard_package.json`
+- `shotlist.csv`
+- `render_queue.json`
+- `timeline.edl`

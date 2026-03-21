@@ -1,31 +1,65 @@
 """Auto-CineFlow: LLM-driven cinematic storyboard parameter generator."""
 
+from importlib import import_module
+
 from .models import (
+    AxisSide,
+    BeatType,
+    CameraAngle,
+    CameraAngleType,
+    CameraPlacement,
     Character,
     CharacterFacing,
-    ShotType,
-    CameraAngleType,
-    ShotTemplate,
+    CompositionHint,
+    DialogueLine,
     FramingParams,
-    CameraAngle,
     LightingParams,
     MotionInstruction,
-    ShotBlock,
+    SceneBeat,
     SceneContext,
+    ShotBlock,
+    ShotTemplate,
+    ShotType,
 )
-from .pipeline import CineFlowPipeline
 
 __all__ = [
+    "AxisSide",
+    "BeatType",
+    "CameraAngle",
+    "CameraAngleType",
+    "CameraPlacement",
     "Character",
     "CharacterFacing",
-    "ShotType",
-    "CameraAngleType",
-    "ShotTemplate",
+    "CompositionHint",
+    "DeliveryShot",
+    "DialogueLine",
     "FramingParams",
-    "CameraAngle",
     "LightingParams",
     "MotionInstruction",
-    "ShotBlock",
+    "RenderJob",
+    "RenderPreset",
+    "SceneBeat",
     "SceneContext",
+    "ShotBlock",
+    "ShotTemplate",
+    "ShotType",
+    "StoryboardPackage",
     "CineFlowPipeline",
 ]
+
+_LAZY_EXPORTS = {
+    "DeliveryShot": ".delivery",
+    "RenderJob": ".delivery",
+    "RenderPreset": ".delivery",
+    "StoryboardPackage": ".delivery",
+    "CineFlowPipeline": ".pipeline",
+}
+
+
+def __getattr__(name: str):
+    """Lazily load heavy exports to keep CLI module execution clean."""
+
+    if name in _LAZY_EXPORTS:
+        module = import_module(_LAZY_EXPORTS[name], __name__)
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
