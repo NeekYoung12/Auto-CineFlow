@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import autocineflow.provider_probe as provider_probe_module
 
 from autocineflow.provider_probe import build_provider_probe_report, write_provider_probe_report
 
@@ -30,6 +31,16 @@ def test_build_provider_probe_report(monkeypatch):
         return DummyResponse()
 
     monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(
+        provider_probe_module,
+        "resolve_local_vlm_settings",
+        lambda config_path=None: {
+            "python_path": "D:/missing/python.exe",
+            "model_path": "D:/missing/model",
+            "device_preference": "cuda",
+            "min_free_vram_gb": "4",
+        },
+    )
 
     temp_dir = _workspace_temp_dir()
     try:
@@ -73,13 +84,15 @@ def test_build_provider_probe_report(monkeypatch):
         with config_path.open("a", encoding="utf-8") as handle:
             handle.write(f"\nRUNNINGHUB_API_FORMAT_DIR={api_dir}\n")
         report = build_provider_probe_report(config_path=str(config_path), timeout_seconds=10.0)
-        assert len(report.results) == 3
+        assert len(report.results) == 4
         assert report.results[0].provider == "volcengine_ark"
         assert report.results[0].ok is True
         assert report.results[1].provider == "runninghub"
         assert report.results[1].ok is True
         assert report.results[2].provider == "runninghub_workflows"
         assert report.results[2].ok is True
+        assert report.results[3].provider == "local_visual_review"
+        assert report.results[3].ok is False
 
         files = write_provider_probe_report(report, temp_dir / "probe")
         payload = json.loads(files["probe_report"].read_text(encoding="utf-8"))

@@ -75,6 +75,31 @@ def test_project_dashboard_combines_storyboard_render_and_execution_data():
             ),
             encoding="utf-8",
         )
+        (scene_dir / "keyframe_qc" / "local_vlm").mkdir(parents=True, exist_ok=True)
+        (scene_dir / "keyframe_qc" / "local_vlm" / "local_visual_review_report.json").write_text(
+            json.dumps(
+                {
+                    "source_id": "SCENE_A",
+                    "enabled": True,
+                    "skipped": False,
+                    "results": [
+                        {
+                            "shot_id": "SCENE_A_SH001",
+                            "output_path": "frame.png",
+                            "status": "ok",
+                            "score": 0.86,
+                            "recommendation": "approve",
+                            "issues": [],
+                            "notes": [],
+                            "reason": "",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         render_report = pipeline.build_project_render_qa_report(previous, previous_files["scenes_dir"], min_score=0.9)
         execution_plan = pipeline.build_project_execution_plan(previous, current, previous_files["scenes_dir"])
         dashboard = pipeline.build_project_dashboard(
@@ -87,10 +112,12 @@ def test_project_dashboard_combines_storyboard_render_and_execution_data():
         assert dashboard.scene_count == 1
         assert dashboard.storyboard_ready_count == 1
         assert dashboard.keyframe_ready_count == 1
+        assert dashboard.local_visual_ready_count == 1
         assert dashboard.render_ready_count == 1
         assert dashboard.total_reuse_count == 5
         assert dashboard.total_rerender_count == 0
         assert dashboard.scene_rows[0].keyframe_passes is True
+        assert dashboard.scene_rows[0].local_visual_passes is True
         assert dashboard.scene_rows[0].overall_status == "ready"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

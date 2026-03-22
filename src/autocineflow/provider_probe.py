@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from .config_loader import (
+    resolve_local_vlm_settings,
     resolve_runninghub_api_format_dir,
     resolve_runninghub_settings,
     resolve_runninghub_workflow_ids,
@@ -125,6 +126,29 @@ def probe_volcengine_ark_config(config_path: str | None = None) -> ProviderProbe
     )
 
 
+def probe_local_visual_review(config_path: str | None = None) -> ProviderProbeResult:
+    """Check whether the local visual review Python and model paths exist."""
+
+    settings = resolve_local_vlm_settings(config_path)
+    python_path = Path(settings["python_path"])
+    model_path = Path(settings["model_path"])
+    ok = python_path.exists() and model_path.exists()
+    return ProviderProbeResult(
+        provider="local_visual_review",
+        ok=ok,
+        endpoint=str(model_path),
+        message="configured" if ok else "missing_runtime_paths",
+        details={
+            "python_path": str(python_path),
+            "python_exists": python_path.exists(),
+            "model_path": str(model_path),
+            "model_exists": model_path.exists(),
+            "device_preference": settings["device_preference"],
+            "min_free_vram_gb": settings["min_free_vram_gb"],
+        },
+    )
+
+
 def build_provider_probe_report(
     config_path: str | None = None,
     timeout_seconds: float = 30.0,
@@ -135,6 +159,7 @@ def build_provider_probe_report(
         probe_volcengine_ark_config(config_path=config_path),
         probe_runninghub_account(config_path=config_path, timeout_seconds=timeout_seconds),
         probe_runninghub_workflow_registry(config_path=config_path),
+        probe_local_visual_review(config_path=config_path),
     ]
     return ProviderProbeReport(results=results)
 

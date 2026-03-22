@@ -84,6 +84,31 @@ def test_asset_library_indexes_scene_and_project_versions():
             ),
             encoding="utf-8",
         )
+        (temp_dir / "scene_run" / "keyframe_qc" / "local_vlm").mkdir(parents=True, exist_ok=True)
+        (temp_dir / "scene_run" / "keyframe_qc" / "local_vlm" / "local_visual_review_report.json").write_text(
+            json.dumps(
+                {
+                    "source_id": "LIB_SCENE",
+                    "enabled": True,
+                    "skipped": False,
+                    "results": [
+                        {
+                            "shot_id": "LIB_SCENE_SH001",
+                            "output_path": "frame.png",
+                            "status": "ok",
+                            "score": 0.88,
+                            "recommendation": "approve",
+                            "issues": [],
+                            "notes": [],
+                            "reason": "",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         # Project output
         project = pipeline.build_project_package(
             scene_inputs=[
@@ -110,6 +135,8 @@ def test_asset_library_indexes_scene_and_project_versions():
         assert latest_project.project_name == "Library Project"
         assert any(scene.keyframe_qa_score == 0.82 for scene in library.scene_versions)
         assert any(scene.keyframe_gate_passed is True for scene in library.scene_versions)
+        assert any(scene.local_visual_review_score == 0.88 for scene in library.scene_versions)
+        assert any(scene.local_visual_review_passed is True for scene in library.scene_versions)
         assert any(scene.failed_submission_count == 1 for scene in library.scene_versions)
         assert any(scene.recovery_decision_count == 1 for scene in library.scene_versions)
         assert any(scene.queue_paused is True for scene in library.scene_versions)
