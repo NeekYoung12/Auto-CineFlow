@@ -100,6 +100,17 @@ from .sequence_assembly import (
     sequence_assembly_json,
     write_sequence_assembly_plan,
 )
+from .sequence_qa import (
+    SequenceQAReport,
+    SequenceRepairPlan,
+    build_sequence_qa_report,
+    build_sequence_repair_plan,
+    sequence_qa_report_json,
+    sequence_repair_plan_json,
+    sequence_qa_markdown,
+    sequence_repair_markdown,
+    write_sequence_qc_outputs,
+)
 from .result_ingest import (
     ArtifactDownloadBatch,
     artifact_download_batch_json,
@@ -879,3 +890,48 @@ class CineFlowPipeline:
         """Write sequence assembly planning assets to disk."""
 
         return write_sequence_assembly_plan(plan, output_dir)
+
+    def build_sequence_qa_report(
+        self,
+        plan: SequenceAssemblyPlan,
+        assembly_dir: str | Path,
+        final_sequence_filename: str | None = None,
+    ) -> SequenceQAReport:
+        """Build a sequence QA report for stitched clip assets."""
+
+        return build_sequence_qa_report(plan, assembly_dir, final_sequence_filename=final_sequence_filename)
+
+    def build_sequence_repair_plan(self, report: SequenceQAReport) -> SequenceRepairPlan:
+        """Build a sequence repair plan from a failed sequence QA report."""
+
+        return build_sequence_repair_plan(report)
+
+    def sequence_qa_report_json(self, report: SequenceQAReport, indent: int = 2) -> str:
+        """Serialise a sequence QA report."""
+
+        return sequence_qa_report_json(report, indent=indent)
+
+    def sequence_repair_plan_json(self, plan: SequenceRepairPlan, indent: int = 2) -> str:
+        """Serialise a sequence repair plan."""
+
+        return sequence_repair_plan_json(plan, indent=indent)
+
+    def sequence_qa_markdown(self, report: SequenceQAReport) -> str:
+        """Export a human-readable sequence QA report."""
+
+        return sequence_qa_markdown(report)
+
+    def sequence_repair_markdown(self, plan: SequenceRepairPlan) -> str:
+        """Export a human-readable sequence repair plan."""
+
+        return sequence_repair_markdown(plan)
+
+    def write_sequence_qc_outputs(
+        self,
+        report: SequenceQAReport,
+        repair_plan: SequenceRepairPlan,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write sequence QA and repair outputs to disk."""
+
+        return write_sequence_qc_outputs(report, repair_plan, output_dir)
