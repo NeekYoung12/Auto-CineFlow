@@ -496,6 +496,15 @@ python -m uv run python -m autocineflow.scene_repair ^
   --config-path D:\Codex\workspace\config\conf
 ```
 
+To rerun only the keyframe stages for a scene blocked before video generation:
+
+```bash
+python -m uv run python -m autocineflow.scene_keyframe_repair ^
+  --run-dir out\scene_runninghub_rebuild_prod ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --enable-local-vlm-review
+```
+
 ## Submission Monitoring
 
 For filesystem-backed queues you can monitor batch progress:
