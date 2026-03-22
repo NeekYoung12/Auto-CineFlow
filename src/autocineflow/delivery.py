@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .consistency_models import ConsistencyPackage
 from .models import BeatType, SceneContext, ShotBlock, ShotType
 
 
@@ -39,6 +40,14 @@ class CharacterBibleEntry(BaseModel):
     continuity_tag: str
     preferred_facing: str
     default_seed: int = Field(..., ge=0)
+    identity_prompt: str = ""
+    face_notes: str = ""
+    makeup_notes: str = ""
+    wardrobe_notes: str = ""
+    reference_image_paths: list[str] = Field(default_factory=list)
+    multiview_reference_images: dict[str, str] = Field(default_factory=dict)
+    faceid_profile_id: str = ""
+    fusion_candidate_ids: list[str] = Field(default_factory=list)
 
 
 class DeliveryShot(BaseModel):
@@ -69,6 +78,9 @@ class DeliveryShot(BaseModel):
     story_purpose: str = ""
     staging_note: str = ""
     nose_room_note: str = ""
+    character_reference_images: list[str] = Field(default_factory=list)
+    scene_reference_images: list[str] = Field(default_factory=list)
+    identity_prompt_suffix: str = ""
 
 
 class RenderJob(BaseModel):
@@ -105,6 +117,9 @@ class VideoSegment(BaseModel):
     render_seed: int = Field(..., ge=0)
     reference_shot_id: str = ""
     continuity_group: str = ""
+    character_reference_images: list[str] = Field(default_factory=list)
+    scene_reference_images: list[str] = Field(default_factory=list)
+    faceid_profile_ids: dict[str, str] = Field(default_factory=dict)
 
 
 class StoryboardPackage(BaseModel):
@@ -124,6 +139,7 @@ class StoryboardPackage(BaseModel):
     shots: list[DeliveryShot] = Field(default_factory=list)
     render_queue: list[RenderJob] = Field(default_factory=list)
     video_segments: list[VideoSegment] = Field(default_factory=list)
+    consistency_package: ConsistencyPackage | None = None
 
 
 _BASE_DURATIONS: dict[ShotType, float] = {
@@ -532,6 +548,10 @@ def storyboard_review_markdown(package: StoryboardPackage) -> str:
         lines.append(
             f"- `{character.char_id}`: {character.visual_anchor} | continuity `{character.continuity_tag}` | seed `{character.default_seed}`"
         )
+        if character.faceid_profile_id:
+            lines.append(
+                f"  FaceID `{character.faceid_profile_id}` | refs `{len(character.reference_image_paths)}` | candidates `{len(character.fusion_candidate_ids)}`"
+            )
 
     lines.extend(["", "## Shot List", ""])
     for shot in package.shots:
@@ -546,6 +566,7 @@ def storyboard_review_markdown(package: StoryboardPackage) -> str:
                 f"- Purpose: {shot.story_purpose or 'n/a'}",
                 f"- Staging: {shot.staging_note or 'n/a'}",
                 f"- Nose Room: {shot.nose_room_note or 'n/a'}",
+                f"- Character Refs: `{len(shot.character_reference_images)}` | Scene Refs: `{len(shot.scene_reference_images)}`",
                 "",
                 "**Prompt**",
                 "",

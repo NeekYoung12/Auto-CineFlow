@@ -9,11 +9,51 @@ from typing import Any
 from .delivery import StoryboardPackage
 
 
+def _remote_urls(paths: list[str]) -> list[str]:
+    return [path for path in paths if path.startswith(("http://", "https://"))]
+
+
+def _local_paths(paths: list[str]) -> list[str]:
+    return [path for path in paths if not path.startswith(("http://", "https://"))]
+
+
 def automatic1111_bundle(package: StoryboardPackage) -> list[dict[str, Any]]:
     """Build Automatic1111-style txt2img payloads for each render job."""
 
     jobs: list[dict[str, Any]] = []
     for render_job in package.render_queue:
+        character_refs = list(render_job.metadata.get("character_reference_images", []))
+        scene_refs = list(render_job.metadata.get("scene_reference_images", []))
+        faceid_profile_ids = dict(render_job.metadata.get("faceid_profile_ids", {}))
+        alwayson_scripts: dict[str, Any] = {
+            "controlnet": {
+                "args": [
+                    {
+                        "char_id": point["char_id"],
+                        "x": point["x"],
+                        "y": point["y"],
+                    }
+                    for point in render_job.controlnet_points
+                ]
+            }
+        }
+        if character_refs or faceid_profile_ids:
+            alwayson_scripts["ip_adapter_faceid"] = {
+                "args": [
+                    {
+                        "char_id": char_id,
+                        "faceid_profile_id": profile_id,
+                        "reference_images": character_refs,
+                        "weight": 0.85,
+                    }
+                    for char_id, profile_id in faceid_profile_ids.items()
+                ]
+                or [{"reference_images": character_refs, "weight": 0.85}]
+            }
+        if scene_refs:
+            alwayson_scripts["scene_reference"] = {
+                "args": [{"reference_images": scene_refs, "weight": 0.65}]
+            }
         jobs.append(
             {
                 "job_id": render_job.job_id,
@@ -28,18 +68,7 @@ def automatic1111_bundle(package: StoryboardPackage) -> list[dict[str, Any]]:
                 "height": render_job.height,
                 "batch_size": 1,
                 "n_iter": 1,
-                "alwayson_scripts": {
-                    "controlnet": {
-                        "args": [
-                            {
-                                "char_id": point["char_id"],
-                                "x": point["x"],
-                                "y": point["y"],
-                            }
-                            for point in render_job.controlnet_points
-                        ]
-                    }
-                },
+                "alwayson_scripts": alwayson_scripts,
                 "metadata": dict(render_job.metadata),
             }
         )
@@ -65,8 +94,77 @@ def comfyui_bundle(package: StoryboardPackage) -> list[dict[str, Any]]:
                     "width": render_job.width,
                     "height": render_job.height,
                     "controlnet_points": list(render_job.controlnet_points),
+                    "character_reference_images": list(render_job.metadata.get("character_reference_images", [])),
+                    "scene_reference_images": list(render_job.metadata.get("scene_reference_images", [])),
+                    "faceid_profile_ids": dict(render_job.metadata.get("faceid_profile_ids", {})),
+                    "selected_character_views": dict(render_job.metadata.get("selected_character_views", {})),
                 },
                 "metadata": dict(render_job.metadata),
+            }
+        )
+    return jobs
+
+
+def runninghub_faceid_bundle(package: StoryboardPackage) -> list[dict[str, Any]]:
+    """Build RunningHub-ready workflow bundles emphasizing FaceID consistency."""
+
+    jobs: list[dict[str, Any]] = []
+    for render_job in package.render_queue:
+        character_refs = list(render_job.metadata.get("character_reference_images", []))
+        scene_refs = list(render_job.metadata.get("scene_reference_images", []))
+        jobs.append(
+            {
+                "job_id": render_job.job_id,
+                "shot_id": render_job.shot_id,
+                "workflow_family": "runninghub_comfyui_faceid",
+                "workflow_inputs": {
+                    "positive_prompt": render_job.prompt,
+                    "negative_prompt": render_job.negative_prompt,
+                    "seed": render_job.render_seed,
+                    "width": render_job.width,
+                    "height": render_job.height,
+                    "steps": package.render_preset.steps,
+                    "cfg": package.render_preset.cfg_scale,
+                    "sampler_name": package.render_preset.sampler,
+                    "controlnet_points": list(render_job.controlnet_points),
+                    "character_reference_images": character_refs,
+                    "scene_reference_images": scene_refs,
+                    "faceid_profile_ids": dict(render_job.metadata.get("faceid_profile_ids", {})),
+                    "selected_character_views": dict(render_job.metadata.get("selected_character_views", {})),
+                },
+                "metadata": dict(render_job.metadata),
+            }
+        )
+    return jobs
+
+
+def volcengine_seedream_bundle(package: StoryboardPackage) -> list[dict[str, Any]]:
+    """Build Seedream-style reference bundles for later Volcengine integration."""
+
+    jobs: list[dict[str, Any]] = []
+    for render_job in package.render_queue:
+        character_refs = list(render_job.metadata.get("character_reference_images", []))
+        scene_refs = list(render_job.metadata.get("scene_reference_images", []))
+        all_refs = character_refs + scene_refs
+        jobs.append(
+            {
+                "job_id": render_job.job_id,
+                "shot_id": render_job.shot_id,
+                "provider": "volcengine_seedream_reference",
+                "request": {
+                    "prompt": render_job.prompt,
+                    "negative_prompt": render_job.negative_prompt,
+                    "seed": render_job.render_seed,
+                    "reference_image_urls": _remote_urls(all_refs)[:10],
+                    "image_size": {
+                        "width": render_job.width,
+                        "height": render_job.height,
+                    },
+                },
+                "metadata": {
+                    **dict(render_job.metadata),
+                    "local_reference_images": _local_paths(all_refs),
+                },
             }
         )
     return jobs
@@ -84,6 +182,18 @@ def comfyui_bundle_json(package: StoryboardPackage, indent: int = 2) -> str:
     return json.dumps(comfyui_bundle(package), indent=indent, ensure_ascii=False)
 
 
+def runninghub_faceid_bundle_json(package: StoryboardPackage, indent: int = 2) -> str:
+    """Serialise RunningHub FaceID bundles to JSON."""
+
+    return json.dumps(runninghub_faceid_bundle(package), indent=indent, ensure_ascii=False)
+
+
+def volcengine_seedream_bundle_json(package: StoryboardPackage, indent: int = 2) -> str:
+    """Serialise Volcengine Seedream bundles to JSON."""
+
+    return json.dumps(volcengine_seedream_bundle(package), indent=indent, ensure_ascii=False)
+
+
 def write_provider_payloads(package: StoryboardPackage, output_dir: str | Path) -> dict[str, Path]:
     """Write provider-oriented payload bundles to disk."""
 
@@ -92,11 +202,17 @@ def write_provider_payloads(package: StoryboardPackage, output_dir: str | Path) 
 
     automatic1111_path = target_dir / "automatic1111_txt2img.json"
     comfyui_path = target_dir / "comfyui_prompt_bundle.json"
+    runninghub_path = target_dir / "runninghub_faceid_bundle.json"
+    volcengine_path = target_dir / "volcengine_seedream_bundle.json"
 
     automatic1111_path.write_text(automatic1111_bundle_json(package, indent=2), encoding="utf-8")
     comfyui_path.write_text(comfyui_bundle_json(package, indent=2), encoding="utf-8")
+    runninghub_path.write_text(runninghub_faceid_bundle_json(package, indent=2), encoding="utf-8")
+    volcengine_path.write_text(volcengine_seedream_bundle_json(package, indent=2), encoding="utf-8")
 
     return {
         "automatic1111": automatic1111_path,
         "comfyui": comfyui_path,
+        "runninghub_faceid": runninghub_path,
+        "volcengine_seedream": volcengine_path,
     }

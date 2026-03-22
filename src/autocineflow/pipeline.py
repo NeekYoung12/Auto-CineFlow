@@ -6,6 +6,14 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
+from .consistency import (
+    build_consistency_package,
+    consistency_package_json,
+    consistency_review_markdown,
+    default_reference_roots,
+    write_consistency_package,
+)
+from .consistency_models import ConsistencyPackage, ReferenceLibrary
 from .delivery import (
     RenderPreset,
     StoryboardPackage,
@@ -61,8 +69,11 @@ from .project_dashboard import (
 from .provider_payloads import (
     automatic1111_bundle_json,
     comfyui_bundle_json,
+    runninghub_faceid_bundle_json,
+    volcengine_seedream_bundle_json,
     write_provider_payloads,
 )
+from .reference_rag import build_reference_library
 from .render_qa import (
     RenderExpectation,
     RenderQAReport,
@@ -470,10 +481,14 @@ class CineFlowPipeline:
         project_name: str = "Auto-CineFlow Project",
         render_preset: RenderPreset | None = None,
         generated_at: str | None = None,
+        reference_roots: list[str | Path] | None = None,
+        character_reference_top_k: int = 3,
+        scene_reference_top_k: int = 4,
+        reference_library: ReferenceLibrary | None = None,
     ) -> StoryboardPackage:
         """Build a production delivery package for the scene."""
 
-        return build_storyboard_package(
+        package = build_storyboard_package(
             context=context,
             project_name=project_name,
             render_preset=render_preset,
@@ -481,6 +496,17 @@ class CineFlowPipeline:
             quality_report=self.quality_report(context),
             generated_at=generated_at,
         )
+        if reference_library is not None or reference_roots:
+            consistency = self.build_consistency_package(
+                context,
+                package,
+                reference_roots=reference_roots,
+                reference_library=reference_library,
+                character_top_k=character_reference_top_k,
+                scene_top_k=scene_reference_top_k,
+            )
+            package = self.attach_consistency_package(package, consistency)
+        return package
 
     def storyboard_package_json(
         self,
@@ -521,6 +547,142 @@ class CineFlowPipeline:
 
         return storyboard_review_markdown(package)
 
+    def default_reference_roots(self) -> list[Path]:
+        """Return the default local roots used by consistency retrieval."""
+
+        return default_reference_roots()
+
+    def build_consistency_package(
+        self,
+        context: SceneContext,
+        package: StoryboardPackage,
+        reference_roots: list[str | Path] | None = None,
+        reference_library: ReferenceLibrary | None = None,
+        character_top_k: int = 3,
+        scene_top_k: int = 4,
+    ) -> ConsistencyPackage:
+        """Build a consistency package from local character and scene references."""
+
+        shot_records = [shot.model_dump(mode="json") for shot in package.shots]
+        return build_consistency_package(
+            context,
+            shot_records,
+            reference_roots=reference_roots,
+            reference_library=reference_library,
+            character_top_k=character_top_k,
+            scene_top_k=scene_top_k,
+        )
+
+    def attach_consistency_package(
+        self,
+        package: StoryboardPackage,
+        consistency: ConsistencyPackage,
+    ) -> StoryboardPackage:
+        """Attach consistency metadata to a storyboard package."""
+
+        char_plan_map = {plan.char_id: plan for plan in consistency.character_plans}
+        shot_bundle_map = {bundle.shot_id: bundle for bundle in consistency.shot_bundles}
+
+        updated_character_bible = []
+        for entry in package.character_bible:
+            plan = char_plan_map.get(entry.char_id)
+            if not plan:
+                updated_character_bible.append(entry)
+                continue
+            updated_character_bible.append(
+                entry.model_copy(
+                    update={
+                        "identity_prompt": plan.fused_identity_prompt,
+                        "face_notes": plan.face_notes,
+                        "makeup_notes": plan.makeup_notes,
+                        "wardrobe_notes": plan.wardrobe_notes,
+                        "reference_image_paths": list(plan.source_reference_images),
+                        "multiview_reference_images": dict(plan.multiview_reference_images),
+                        "faceid_profile_id": plan.faceid_profile.profile_id if plan.faceid_profile else "",
+                        "fusion_candidate_ids": list(plan.selected_candidate_ids),
+                    }
+                )
+            )
+
+        updated_shots = []
+        for shot in package.shots:
+            bundle = shot_bundle_map.get(shot.shot_id)
+            if not bundle:
+                updated_shots.append(shot)
+                continue
+            prompt = shot.prompt
+            if bundle.prompt_suffix and bundle.prompt_suffix not in prompt:
+                prompt = f"{prompt}, {bundle.prompt_suffix}"
+            updated_shots.append(
+                shot.model_copy(
+                    update={
+                        "prompt": prompt,
+                        "character_reference_images": list(bundle.character_reference_images),
+                        "scene_reference_images": list(bundle.scene_reference_images),
+                        "identity_prompt_suffix": bundle.prompt_suffix,
+                    }
+                )
+            )
+
+        updated_render_queue = []
+        for render_job in package.render_queue:
+            bundle = shot_bundle_map.get(render_job.shot_id)
+            if not bundle:
+                updated_render_queue.append(render_job)
+                continue
+            prompt = render_job.prompt
+            if bundle.prompt_suffix and bundle.prompt_suffix not in prompt:
+                prompt = f"{prompt}, {bundle.prompt_suffix}"
+            metadata = {
+                **render_job.metadata,
+                "character_reference_images": list(bundle.character_reference_images),
+                "scene_reference_images": list(bundle.scene_reference_images),
+                "faceid_profile_ids": dict(bundle.faceid_profile_ids),
+                "selected_character_views": dict(bundle.selected_character_views),
+                "identity_prompt_suffix": bundle.prompt_suffix,
+            }
+            updated_render_queue.append(render_job.model_copy(update={"prompt": prompt, "metadata": metadata}))
+
+        updated_video_segments = []
+        for segment in package.video_segments:
+            bundle = shot_bundle_map.get(segment.shot_id)
+            if not bundle:
+                updated_video_segments.append(segment)
+                continue
+            prompt = segment.prompt
+            if bundle.prompt_suffix and bundle.prompt_suffix not in prompt:
+                prompt = f"{prompt}, {bundle.prompt_suffix}"
+            updated_video_segments.append(
+                segment.model_copy(
+                    update={
+                        "prompt": prompt,
+                        "character_reference_images": list(bundle.character_reference_images),
+                        "scene_reference_images": list(bundle.scene_reference_images),
+                        "faceid_profile_ids": dict(bundle.faceid_profile_ids),
+                    }
+                )
+            )
+
+        return package.model_copy(
+            update={
+                "character_bible": updated_character_bible,
+                "shots": updated_shots,
+                "render_queue": updated_render_queue,
+                "video_segments": updated_video_segments,
+                "consistency_package": consistency,
+            }
+        )
+
+    def consistency_package_json(self, package: ConsistencyPackage, indent: int = 2) -> str:
+        """Serialise a consistency package to JSON."""
+
+        return consistency_package_json(package, indent=indent)
+
+    def consistency_review_markdown(self, package: ConsistencyPackage) -> str:
+        """Export a human-readable consistency review document."""
+
+        return consistency_review_markdown(package)
+
     def automatic1111_bundle_json(self, package: StoryboardPackage, indent: int = 2) -> str:
         """Serialise Automatic1111-style payloads."""
 
@@ -530,6 +692,16 @@ class CineFlowPipeline:
         """Serialise ComfyUI-oriented bundles."""
 
         return comfyui_bundle_json(package, indent=indent)
+
+    def runninghub_faceid_bundle_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise RunningHub FaceID bundles."""
+
+        return runninghub_faceid_bundle_json(package, indent=indent)
+
+    def volcengine_seedream_bundle_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise Volcengine Seedream reference bundles."""
+
+        return volcengine_seedream_bundle_json(package, indent=indent)
 
     def render_manifest_template_json(self, package: StoryboardPackage, indent: int = 2) -> str:
         """Serialise the expected render manifest template."""
@@ -565,6 +737,11 @@ class CineFlowPipeline:
 
         files = write_storyboard_package(package, output_dir)
         provider_files = write_provider_payloads(package, Path(output_dir) / "providers")
+        consistency_files = (
+            self.write_consistency_package(package.consistency_package, Path(output_dir) / "consistency")
+            if package.consistency_package is not None
+            else {}
+        )
         render_manifest_path = Path(output_dir) / "render_manifest_template.json"
         render_manifest_path.write_text(
             self.render_manifest_template_json(package, indent=2),
@@ -577,9 +754,19 @@ class CineFlowPipeline:
         return {
             **files,
             **provider_files,
+            **consistency_files,
             "render_manifest_template": render_manifest_path,
             **assembly_files,
         }
+
+    def write_consistency_package(
+        self,
+        package: ConsistencyPackage,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write consistency outputs to disk."""
+
+        return write_consistency_package(package, output_dir)
 
     def write_render_qa_report(
         self,
@@ -597,10 +784,14 @@ class CineFlowPipeline:
         use_llm: bool = True,
         min_score: float = 0.85,
         max_attempts: int = 3,
+        reference_roots: list[str | Path] | None = None,
+        character_reference_top_k: int = 3,
+        scene_reference_top_k: int = 4,
     ) -> ProjectPackage:
         """Build a project package from multiple scene requests."""
 
         scene_packages: list[StoryboardPackage] = []
+        reference_library = build_reference_library(list(reference_roots)) if reference_roots else None
         for scene in scene_inputs:
             context, _ = self.run_with_quality_gate(
                 description=scene.description,
@@ -611,7 +802,16 @@ class CineFlowPipeline:
                 min_score=min_score,
                 max_attempts=max_attempts,
             )
-            scene_packages.append(self.build_storyboard_package(context, project_name=project_name))
+            scene_packages.append(
+                self.build_storyboard_package(
+                    context,
+                    project_name=project_name,
+                    reference_roots=reference_roots,
+                    character_reference_top_k=character_reference_top_k,
+                    scene_reference_top_k=scene_reference_top_k,
+                    reference_library=reference_library,
+                )
+            )
 
         return build_project_package(project_name=project_name, scenes=scene_packages)
 

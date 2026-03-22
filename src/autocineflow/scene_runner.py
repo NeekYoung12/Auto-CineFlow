@@ -34,6 +34,10 @@ def main() -> int:
     parser.add_argument("--auto-retry-transient", type=int, default=1, help="Automatic retry attempts for transient provider failures")
     parser.add_argument("--skip-download", action="store_true", help="Do not download URL artifacts")
     parser.add_argument("--skip-assemble", action="store_true", help="Do not auto-stitch downloaded video clips")
+    parser.add_argument("--reference-root", action="append", default=[], help="Optional local reference asset root; may be repeated")
+    parser.add_argument("--disable-consistency-rag", action="store_true", help="Disable local reference retrieval and consistency packaging")
+    parser.add_argument("--character-reference-top-k", type=int, default=3, help="Top character candidates to keep per role")
+    parser.add_argument("--scene-reference-top-k", type=int, default=4, help="Top scene candidates to keep")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -44,6 +48,10 @@ def main() -> int:
             target_duration_seconds=args.target_duration_seconds,
             clip_duration_seconds=args.clip_duration_seconds,
         )
+    reference_roots = None
+    if not args.disable_consistency_rag:
+        reference_roots = args.reference_root or [str(path) for path in pipeline.default_reference_roots()]
+
     context = pipeline.run(
         description=args.description,
         num_shots=num_shots,
@@ -60,6 +68,9 @@ def main() -> int:
         context,
         project_name=args.project_name,
         render_preset=render_preset,
+        reference_roots=reference_roots,
+        character_reference_top_k=args.character_reference_top_k,
+        scene_reference_top_k=args.scene_reference_top_k,
     )
     delivery_files = pipeline.write_delivery_package(package, output_dir / "delivery")
 

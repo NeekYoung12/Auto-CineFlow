@@ -124,25 +124,34 @@ def build_submission_jobs_from_package(
     """Build submission jobs from a scene package."""
 
     if provider == SubmissionProvider.MINIMAX_IMAGE:
-        return [
-            SubmissionJob(
-                job_id=job.job_id,
-                shot_id=job.shot_id,
-                scene_id=job.metadata.get("scene_id", package.scene_id),
-                provider=provider,
-                payload={
-                    "model": "image-01",
-                    "prompt": job.prompt,
-                    "aspect_ratio": _aspect_ratio_label(job.width, job.height),
-                    "response_format": "url",
-                    "seed": job.render_seed,
-                    "n": 1,
-                    "prompt_optimizer": False,
-                    "aigc_watermark": False,
-                },
+        jobs: list[SubmissionJob] = []
+        for job in package.render_queue:
+            payload = {
+                "model": "image-01",
+                "prompt": job.prompt,
+                "aspect_ratio": _aspect_ratio_label(job.width, job.height),
+                "response_format": "url",
+                "seed": job.render_seed,
+                "n": 1,
+                "prompt_optimizer": False,
+                "aigc_watermark": False,
+            }
+            reference_urls = _external_reference_urls(job.metadata.get("character_reference_images", []))
+            if reference_urls:
+                payload["subject_reference"] = [
+                    {"type": "character", "image_file": url}
+                    for url in reference_urls[:3]
+                ]
+            jobs.append(
+                SubmissionJob(
+                    job_id=job.job_id,
+                    shot_id=job.shot_id,
+                    scene_id=job.metadata.get("scene_id", package.scene_id),
+                    provider=provider,
+                    payload=payload,
+                )
             )
-            for job in package.render_queue
-        ]
+        return jobs
 
     if provider == SubmissionProvider.MINIMAX_VIDEO:
         return [
@@ -256,6 +265,16 @@ def _aspect_ratio_label(width: int, height: int) -> str:
         "9:16": 9 / 16,
     }
     return min(supported, key=lambda label: abs(supported[label] - ratio))
+
+
+def _external_reference_urls(paths: list[Any]) -> list[str]:
+    """Keep only remote URLs that a hosted API can resolve directly."""
+
+    urls: list[str] = []
+    for path in paths:
+        if isinstance(path, str) and path.startswith(("http://", "https://")) and path not in urls:
+            urls.append(path)
+    return urls
 
 
 def _condense_minimax_video_prompt(prompt: str, max_chars: int = 320) -> str:

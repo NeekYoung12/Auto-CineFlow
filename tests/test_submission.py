@@ -187,6 +187,28 @@ def test_submit_jobs_to_minimax_api_backend(monkeypatch):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_build_minimax_image_jobs_include_subject_reference_for_remote_urls():
+    pipeline, package = _build_package()
+    first_job = package.render_queue[0].model_copy(
+        update={
+            "metadata": {
+                **package.render_queue[0].metadata,
+                "character_reference_images": ["https://example.invalid/ref-face.png"],
+            }
+        }
+    )
+    updated_package = package.model_copy(
+        update={
+            "render_queue": [first_job, *package.render_queue[1:]],
+        }
+    )
+
+    jobs = pipeline.build_submission_jobs_from_package(updated_package, provider=SubmissionProvider.MINIMAX_IMAGE)
+
+    assert jobs[0].payload["subject_reference"][0]["image_file"] == "https://example.invalid/ref-face.png"
+    assert jobs[0].payload["subject_reference"][0]["type"] == "character"
+
+
 def test_submit_video_jobs_to_minimax_api_backend(monkeypatch):
     pipeline, package = _build_package()
     jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_VIDEO)

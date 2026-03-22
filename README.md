@@ -11,8 +11,10 @@ Auto-CineFlow is an LLM-driven cinematic storyboard generator for 1-2 character 
 - Narrative beat planning across `ESTABLISH`, `RELATION`, `BUILD`, `ESCALATION`, `REACTION`, and `RESOLUTION`
 - English and Chinese scene parsing with dialogue extraction
 - Prompt assembly for Stable Diffusion-style image/video workflows
+- Local reference retrieval over existing character sheets, storyboard outputs, and film clips
+- Character consistency packaging with reference portraits, multiview prompts, and FaceID-compatible descriptors
 - Delivery packaging to manifest JSON, shot list CSV, render queue JSON, and editorial EDL
-- Provider bundles for common generation stacks such as Automatic1111-style and ComfyUI-oriented payloads
+- Provider bundles for Automatic1111, ComfyUI, RunningHub FaceID workflows, and Volcengine Seedream-style reference jobs
 - Acceptance and production-readiness reports
 
 ## Architecture
@@ -83,11 +85,13 @@ Each packaged shot includes:
 - render prompt and negative prompt
 - ControlNet-compatible points
 - staging and nose-room notes
+- optional character reference images, scene reference images, and identity prompt suffixes
 
 The package also includes a `character_bible` with per-character continuity tags and default seeds.
 For human review, the exporter also writes a `storyboard_review.md` document.
 Provider-oriented files are also written for downstream generators.
 It also writes a `render_manifest_template.json` file for downstream render tracking and QA.
+When consistency retrieval is enabled, it also writes a `consistency/consistency_package.json` and `consistency/consistency_review.md`.
 
 ## Validation
 
@@ -137,7 +141,44 @@ This writes:
 - `storyboard_review.md`
 - `providers/automatic1111_txt2img.json`
 - `providers/comfyui_prompt_bundle.json`
+- `providers/runninghub_faceid_bundle.json`
+- `providers/volcengine_seedream_bundle.json`
+- `consistency/consistency_package.json`
+- `consistency/consistency_review.md`
 - `render_manifest_template.json`
+
+## Consistency RAG
+
+Auto-CineFlow can now scan local reference roots after storyboard generation and assemble a production-ready consistency package:
+
+- character candidate retrieval from prior character sheets and portrait libraries
+- scene candidate retrieval from prior storyboard outputs and film/report assets
+- fused identity prompts that preserve face, makeup, and wardrobe traits
+- multiview prompts for character turnaround generation
+- FaceID-compatible surrogate descriptors for downstream IP-Adapter / PuLID / FaceID workflows
+
+By default, `scene_runner` and `project_batch` will scan:
+
+- `out/`
+- `../video-studio-system/ai_film_studio/assets`
+- `../video-studio-system/runtime_outputs`
+
+You can override these roots explicitly:
+
+```bash
+python -m uv run python -m autocineflow.scene_runner ^
+  --description "A detective in a rain-soaked trench coat confronts a wounded informant in a neon alley at night." ^
+  --scene-id SCENE_CONSISTENCY ^
+  --output-dir out\scene_consistency ^
+  --provider automatic1111 ^
+  --backend dry_run ^
+  --offline ^
+  --skip-download ^
+  --reference-root D:\Codex\workspace\Auto-CineFlow\out ^
+  --reference-root D:\Codex\workspace\video-studio-system\ai_film_studio\assets
+```
+
+Use `--disable-consistency-rag` if you want the old behavior without reference retrieval.
 
 ## Render QA
 
@@ -338,6 +379,12 @@ python -m uv run python -m autocineflow.scene_runner ^
 ```
 
 For MiniMax text-to-video, swap `--provider minimax_video`.
+
+For offline consistency-package generation only, use a dry-run backend such as `automatic1111 + dry_run` or `comfyui + dry_run`. The run will still emit:
+
+- `delivery/consistency/consistency_package.json`
+- `delivery/providers/runninghub_faceid_bundle.json`
+- `delivery/providers/volcengine_seedream_bundle.json`
 
 If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
 

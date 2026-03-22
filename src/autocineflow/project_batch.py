@@ -21,16 +21,26 @@ def main() -> int:
     parser.add_argument("--model", default="gpt-5", help="LLM model name")
     parser.add_argument("--min-score", type=float, default=0.85, help="Quality gate threshold")
     parser.add_argument("--max-attempts", type=int, default=3, help="Maximum retry attempts per scene")
+    parser.add_argument("--reference-root", action="append", default=[], help="Optional local reference asset root; may be repeated")
+    parser.add_argument("--disable-consistency-rag", action="store_true", help="Disable local reference retrieval and consistency packaging")
+    parser.add_argument("--character-reference-top-k", type=int, default=3, help="Top character candidates to keep per role")
+    parser.add_argument("--scene-reference-top-k", type=int, default=4, help="Top scene candidates to keep")
     args = parser.parse_args()
 
     pipeline = CineFlowPipeline(config_path=args.config_path, model=args.model)
     scene_inputs = load_scene_inputs(args.input_file)
+    reference_roots = None
+    if not args.disable_consistency_rag:
+        reference_roots = args.reference_root or [str(path) for path in pipeline.default_reference_roots()]
     project_package = pipeline.build_project_package(
         scene_inputs=scene_inputs,
         project_name=args.project_name,
         use_llm=not args.offline,
         min_score=args.min_score,
         max_attempts=args.max_attempts,
+        reference_roots=reference_roots,
+        character_reference_top_k=args.character_reference_top_k,
+        scene_reference_top_k=args.scene_reference_top_k,
     )
     output_files = pipeline.write_project_package(project_package, args.output_dir)
 

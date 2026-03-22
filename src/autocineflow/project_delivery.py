@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from .consistency import write_consistency_package
 from .delivery import StoryboardPackage, slugify, write_storyboard_package
 from .provider_payloads import write_provider_payloads
 from .render_qa import render_manifest_template_json
@@ -198,6 +199,8 @@ def write_project_package(
         scene_dir = scenes_dir / slugify(scene.scene_id, default=scene.scene_id.lower())
         write_storyboard_package(scene, scene_dir)
         write_provider_payloads(scene, scene_dir / "providers")
+        if scene.consistency_package is not None:
+            write_consistency_package(scene.consistency_package, scene_dir / "consistency")
         (scene_dir / "render_manifest_template.json").write_text(
             render_manifest_template_json(scene, indent=2),
             encoding="utf-8",
