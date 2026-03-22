@@ -114,18 +114,18 @@ def build_submission_jobs_from_package(
     if provider == SubmissionProvider.MINIMAX_VIDEO:
         return [
             SubmissionJob(
-                job_id=job.job_id,
-                shot_id=job.shot_id,
-                scene_id=job.metadata.get("scene_id", package.scene_id),
+                job_id=segment.segment_id,
+                shot_id=segment.shot_id,
+                scene_id=segment.scene_id,
                 provider=provider,
                 payload={
                     "model": "MiniMax-Hailuo-02",
-                    "prompt": job.prompt,
-                    "duration": 6,
+                    "prompt": segment.prompt,
+                    "duration": int(segment.generation_duration_seconds),
                     "resolution": "768P",
                 },
             )
-            for job in package.render_queue
+            for segment in package.video_segments
         ]
 
     if provider == SubmissionProvider.AUTOMATIC1111:

@@ -26,6 +26,9 @@ class RenderPreset(BaseModel):
     steps: int = Field(default=30, ge=1)
     cfg_scale: float = Field(default=6.5, ge=0.0)
     seed_base: int = Field(default=420000, ge=0)
+    video_target_duration_seconds: float = Field(default=10.0, ge=1.0)
+    video_max_duration_seconds: float = Field(default=10.0, ge=1.0)
+    video_handle_seconds: float = Field(default=1.0, ge=0.0)
 
 
 class CharacterBibleEntry(BaseModel):
@@ -86,6 +89,24 @@ class RenderJob(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class VideoSegment(BaseModel):
+    """Provider-oriented video generation segment for a shot."""
+
+    segment_id: str
+    shot_id: str
+    scene_id: str
+    segment_index: int = Field(..., ge=1)
+    total_segments: int = Field(..., ge=1)
+    generation_duration_seconds: float = Field(..., ge=1.0)
+    covered_timeline_seconds: float = Field(..., ge=0.1)
+    start_offset_seconds: float = Field(..., ge=0.0)
+    prompt: str
+    negative_prompt: str
+    render_seed: int = Field(..., ge=0)
+    reference_shot_id: str = ""
+    continuity_group: str = ""
+
+
 class StoryboardPackage(BaseModel):
     """Packaged production artifact containing manifest and render jobs."""
 
@@ -102,6 +123,7 @@ class StoryboardPackage(BaseModel):
     character_bible: list[CharacterBibleEntry] = Field(default_factory=list)
     shots: list[DeliveryShot] = Field(default_factory=list)
     render_queue: list[RenderJob] = Field(default_factory=list)
+    video_segments: list[VideoSegment] = Field(default_factory=list)
 
 
 _BASE_DURATIONS: dict[ShotType, float] = {
@@ -278,6 +300,64 @@ def build_render_job(delivery_shot: DeliveryShot, render_preset: RenderPreset) -
     )
 
 
+def build_video_segments(
+    package_scene_id: str,
+    delivery_shots: list[DeliveryShot],
+    render_preset: RenderPreset,
+) -> list[VideoSegment]:
+    """Build provider-oriented video segments from delivery shots."""
+
+    segments: list[VideoSegment] = []
+    max_duration = render_preset.video_max_duration_seconds
+    target_duration = min(render_preset.video_target_duration_seconds, max_duration)
+    handle_seconds = render_preset.video_handle_seconds
+
+    for shot in delivery_shots:
+        coverage_duration = max(shot.duration_seconds + (2 * handle_seconds), target_duration)
+        remaining = coverage_duration
+        segment_index = 1
+        start_offset = 0.0
+        total_segments = max(1, int((coverage_duration + max_duration - 1e-9) // max_duration))
+        if total_segments * max_duration < coverage_duration:
+            total_segments += 1
+
+        while remaining > 0:
+            current_duration = min(max_duration, remaining)
+            continuation_note = ""
+            if total_segments > 1:
+                if segment_index == 1:
+                    continuation_note = " opening movement of the shot, preserve continuity into the following segment"
+                elif segment_index == total_segments:
+                    continuation_note = " final movement of the shot, resolve the motion naturally"
+                else:
+                    continuation_note = " middle movement of the shot, continue seamlessly from the previous segment"
+
+            segments.append(
+                VideoSegment(
+                    segment_id=f"{shot.shot_id}_SEG{segment_index:02d}",
+                    shot_id=shot.shot_id,
+                    scene_id=package_scene_id,
+                    segment_index=segment_index,
+                    total_segments=total_segments,
+                    generation_duration_seconds=round(current_duration, 2),
+                    covered_timeline_seconds=shot.duration_seconds,
+                    start_offset_seconds=round(start_offset, 2),
+                    prompt=(
+                        f"{shot.prompt}, cinematic motion coverage,{continuation_note}".strip(", ")
+                    ),
+                    negative_prompt=shot.negative_prompt,
+                    render_seed=shot.render_seed + segment_index - 1,
+                    reference_shot_id=shot.reference_shot_id,
+                    continuity_group=shot.continuity_group,
+                )
+            )
+            remaining = round(remaining - current_duration, 6)
+            start_offset += current_duration
+            segment_index += 1
+
+    return segments
+
+
 def build_storyboard_package(
     context: SceneContext,
     project_name: str = "Auto-CineFlow Project",
@@ -303,6 +383,7 @@ def build_storyboard_package(
         delivery_shots.append(delivery_shot)
         elapsed_seconds += delivery_shot.duration_seconds
     render_queue = [build_render_job(shot, render_preset) for shot in delivery_shots]
+    video_segments = build_video_segments(context.scene_id, delivery_shots, render_preset)
     total_duration_seconds = round(sum(shot.duration_seconds for shot in delivery_shots), 2) or 0.1
 
     return StoryboardPackage(
@@ -319,6 +400,7 @@ def build_storyboard_package(
         character_bible=character_bible,
         shots=delivery_shots,
         render_queue=render_queue,
+        video_segments=video_segments,
     )
 
 
@@ -406,6 +488,16 @@ def character_bible_to_json(package: StoryboardPackage, indent: int = 2) -> str:
     )
 
 
+def video_plan_to_json(package: StoryboardPackage, indent: int = 2) -> str:
+    """Serialise the scene video generation plan to JSON."""
+
+    return json.dumps(
+        [segment.model_dump(mode="json") for segment in package.video_segments],
+        indent=indent,
+        ensure_ascii=False,
+    )
+
+
 def storyboard_review_markdown(package: StoryboardPackage) -> str:
     """Export a human-readable markdown review document for editorial approval."""
 
@@ -480,6 +572,7 @@ def write_storyboard_package(
     shotlist_path = target_dir / "shotlist.csv"
     render_queue_path = target_dir / "render_queue.json"
     character_bible_path = target_dir / "character_bible.json"
+    video_plan_path = target_dir / "video_plan.json"
     edl_path = target_dir / "timeline.edl"
     review_markdown_path = target_dir / "storyboard_review.md"
 
@@ -487,6 +580,7 @@ def write_storyboard_package(
     shotlist_path.write_text(shotlist_to_csv(package), encoding="utf-8", newline="")
     render_queue_path.write_text(render_queue_to_json(package, indent=2), encoding="utf-8")
     character_bible_path.write_text(character_bible_to_json(package, indent=2), encoding="utf-8")
+    video_plan_path.write_text(video_plan_to_json(package, indent=2), encoding="utf-8")
     edl_path.write_text(edl_text(package), encoding="utf-8")
     review_markdown_path.write_text(storyboard_review_markdown(package), encoding="utf-8")
 
@@ -495,6 +589,7 @@ def write_storyboard_package(
         "shotlist": shotlist_path,
         "render_queue": render_queue_path,
         "character_bible": character_bible_path,
+        "video_plan": video_plan_path,
         "edl": edl_path,
         "review_markdown": review_markdown_path,
     }

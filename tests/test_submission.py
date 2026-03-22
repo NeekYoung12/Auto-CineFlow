@@ -88,7 +88,7 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     assert minimax_jobs[0].payload["seed"] == package.shots[0].render_seed
     assert "metadata" not in minimax_jobs[0].payload
     assert minimax_video_jobs[0].payload["model"] == "MiniMax-Hailuo-02"
-    assert minimax_video_jobs[0].payload["duration"] == 6
+    assert minimax_video_jobs[0].payload["duration"] == 10
     assert minimax_video_jobs[0].payload["resolution"] == "768P"
 
 

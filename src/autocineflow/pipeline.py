@@ -16,6 +16,7 @@ from .delivery import (
     render_queue_to_json,
     shotlist_to_csv,
     storyboard_review_markdown,
+    video_plan_to_json,
     write_storyboard_package,
 )
 from .change_planner import (
@@ -91,6 +92,13 @@ from .submission_monitor import (
     submission_monitor_markdown,
     submission_monitor_report_json,
     write_submission_monitor_report,
+)
+from .sequence_assembly import (
+    SequenceAssemblyPlan,
+    build_sequence_assembly_plan,
+    recommended_shot_count,
+    sequence_assembly_json,
+    write_sequence_assembly_plan,
 )
 from .result_ingest import (
     ArtifactDownloadBatch,
@@ -468,6 +476,11 @@ class CineFlowPipeline:
 
         return character_bible_to_json(package, indent=indent)
 
+    def video_plan_json(self, package: StoryboardPackage, indent: int = 2) -> str:
+        """Serialise the packaged video generation plan to JSON."""
+
+        return video_plan_to_json(package, indent=indent)
+
     def edl_text(self, package: StoryboardPackage) -> str:
         """Export a simple editorial decision list."""
 
@@ -527,7 +540,16 @@ class CineFlowPipeline:
             self.render_manifest_template_json(package, indent=2),
             encoding="utf-8",
         )
-        return {**files, **provider_files, "render_manifest_template": render_manifest_path}
+        assembly_files = self.write_sequence_assembly_plan(
+            self.build_sequence_assembly_plan(package),
+            Path(output_dir) / "assembly",
+        )
+        return {
+            **files,
+            **provider_files,
+            "render_manifest_template": render_manifest_path,
+            **assembly_files,
+        }
 
     def write_render_qa_report(
         self,
@@ -778,6 +800,22 @@ class CineFlowPipeline:
 
         return write_submission_monitor_report(report, output_dir)
 
+    def recommended_video_shot_count(
+        self,
+        target_duration_seconds: float,
+        clip_duration_seconds: float = 4.0,
+        min_shots: int = 8,
+        max_shots: int = 24,
+    ) -> int:
+        """Recommend a finer-grained shot count for assembled long-form previs."""
+
+        return recommended_shot_count(
+            target_duration_seconds=target_duration_seconds,
+            clip_duration_seconds=clip_duration_seconds,
+            min_shots=min_shots,
+            max_shots=max_shots,
+        )
+
     def download_submission_artifacts(
         self,
         batch: SubmissionBatch,
@@ -818,3 +856,26 @@ class CineFlowPipeline:
         """Sync successful artifact downloads back into a render manifest."""
 
         return update_render_manifest_from_downloads(manifest_path, downloads)
+
+    def build_sequence_assembly_plan(
+        self,
+        package: StoryboardPackage,
+        artifacts_dir: str = "artifacts",
+    ) -> SequenceAssemblyPlan:
+        """Build a clip-by-clip sequence assembly plan."""
+
+        return build_sequence_assembly_plan(package, artifacts_dir=artifacts_dir)
+
+    def sequence_assembly_json(self, plan: SequenceAssemblyPlan, indent: int = 2) -> str:
+        """Serialise a sequence assembly plan."""
+
+        return sequence_assembly_json(plan, indent=indent)
+
+    def write_sequence_assembly_plan(
+        self,
+        plan: SequenceAssemblyPlan,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write sequence assembly planning assets to disk."""
+
+        return write_sequence_assembly_plan(plan, output_dir)

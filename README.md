@@ -317,6 +317,8 @@ python -m uv run python -m autocineflow.scene_runner ^
   --config-path D:\Codex\workspace\config\conf ^
   --provider minimax_image ^
   --backend minimax_api ^
+  --target-duration-seconds 40 ^
+  --clip-duration-seconds 4 ^
   --job-limit 1
 ```
 

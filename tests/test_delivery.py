@@ -55,6 +55,8 @@ def test_build_storyboard_package_contains_stable_shot_ids():
     assert package.character_bible[0].char_id == "CHAR_A"
     assert package.character_bible[0].default_seed >= 420000
     assert package.shots[0].render_seed >= 420000
+    assert package.video_segments[0].generation_duration_seconds == 10.0
+    assert package.video_segments[0].segment_id.endswith("SEG01")
     assert package.shots[0].reference_shot_id == ""
     assert package.shots[1].reference_shot_id == "DELIVERY_SCENE_SH001"
     assert all(shot.duration_seconds > 0 for shot in package.shots)
@@ -70,6 +72,7 @@ def test_export_package_to_csv_and_json():
     manifest_json = pipeline.storyboard_package_json(package, indent=2)
     render_queue_json = pipeline.render_queue_json(package, indent=2)
     character_bible_json = pipeline.character_bible_json(package, indent=2)
+    video_plan_json = pipeline.video_plan_json(package, indent=2)
     automatic1111_json = pipeline.automatic1111_bundle_json(package, indent=2)
     comfyui_json = pipeline.comfyui_bundle_json(package, indent=2)
     csv_text = pipeline.shotlist_csv(package)
@@ -79,6 +82,7 @@ def test_export_package_to_csv_and_json():
     manifest = json.loads(manifest_json)
     render_queue = json.loads(render_queue_json)
     character_bible = json.loads(character_bible_json)
+    video_plan = json.loads(video_plan_json)
     automatic1111_bundle = json.loads(automatic1111_json)
     comfyui_bundle = json.loads(comfyui_json)
 
@@ -86,6 +90,7 @@ def test_export_package_to_csv_and_json():
     assert len(manifest["shots"]) == 5
     assert len(render_queue) == 5
     assert len(character_bible) == 2
+    assert len(video_plan) == 5
     assert len(automatic1111_bundle) == 5
     assert len(comfyui_bundle) == 5
     assert automatic1111_bundle[0]["seed"] == manifest["shots"][0]["render_seed"]
@@ -112,23 +117,33 @@ def test_write_delivery_package_creates_output_files():
             "shotlist",
             "render_queue",
             "character_bible",
+            "video_plan",
             "edl",
             "review_markdown",
             "automatic1111",
             "comfyui",
             "render_manifest_template",
+            "assembly_json",
+            "concat_manifest",
+            "concat_script",
         }
         assert written["manifest"].exists()
         assert written["shotlist"].exists()
         assert written["render_queue"].exists()
         assert written["character_bible"].exists()
+        assert written["video_plan"].exists()
         assert written["edl"].exists()
         assert written["review_markdown"].exists()
         assert written["automatic1111"].exists()
         assert written["comfyui"].exists()
         assert written["render_manifest_template"].exists()
+        assert written["assembly_json"].exists()
+        assert written["concat_manifest"].exists()
+        assert written["concat_script"].exists()
         assert json.loads(written["manifest"].read_text(encoding="utf-8"))["scene_id"] == "DELIVERY_SCENE"
         assert len(json.loads(written["character_bible"].read_text(encoding="utf-8"))) == 2
+        assert len(json.loads(written["video_plan"].read_text(encoding="utf-8"))) == 5
+        assert json.loads(written["assembly_json"].read_text(encoding="utf-8"))["scene_id"] == "DELIVERY_SCENE"
         assert len(json.loads(written["automatic1111"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["comfyui"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["render_manifest_template"].read_text(encoding="utf-8"))) == 5
