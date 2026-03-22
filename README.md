@@ -255,6 +255,21 @@ This writes:
 - `project_dashboard.json`
 - `project_dashboard.md`
 
+## Asset Library
+
+To index all generated scene and project outputs under an `out/` root:
+
+```bash
+python -m uv run python -m autocineflow.asset_library ^
+  --root-dir out ^
+  --output-dir out\asset_library
+```
+
+This writes:
+
+- `asset_library.json`
+- `asset_library.md`
+
 ## Task Submission
 
 To turn a scene package into submit-ready render tasks and queue them to a local spool:

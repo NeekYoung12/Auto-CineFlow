@@ -56,8 +56,8 @@ class DeliveryShot(BaseModel):
     timeline_in: str
     timeline_out: str
     focal_length_mm: int = Field(..., ge=1)
-    render_seed: int = Field(..., ge=0)
-    continuity_group: str
+    render_seed: int = Field(default=0, ge=0)
+    continuity_group: str = ""
     reference_shot_id: str = ""
     axis_side: str
     primary_subjects: list[str] = Field(default_factory=list)
@@ -82,7 +82,7 @@ class RenderJob(BaseModel):
     fps: int
     frame_count: int
     duration_seconds: float
-    render_seed: int = Field(..., ge=0)
+    render_seed: int = Field(default=0, ge=0)
     prompt: str
     negative_prompt: str
     controlnet_points: list[dict[str, float | str]] = Field(default_factory=list)

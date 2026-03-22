@@ -111,6 +111,15 @@ from .sequence_qa import (
     sequence_repair_markdown,
     write_sequence_qc_outputs,
 )
+from .asset_library import (
+    AssetLibrary,
+    build_asset_library,
+    asset_library_json,
+    asset_library_markdown,
+    latest_project_versions,
+    latest_scene_versions,
+    write_asset_library,
+)
 from .result_ingest import (
     ArtifactDownloadBatch,
     artifact_download_batch_json,
@@ -935,3 +944,37 @@ class CineFlowPipeline:
         """Write sequence QA and repair outputs to disk."""
 
         return write_sequence_qc_outputs(report, repair_plan, output_dir)
+
+    def build_asset_library(self, root_dir: str | Path) -> AssetLibrary:
+        """Scan generated outputs into an asset library index."""
+
+        return build_asset_library(root_dir)
+
+    def asset_library_json(self, library: AssetLibrary, indent: int = 2) -> str:
+        """Serialise an asset library."""
+
+        return asset_library_json(library, indent=indent)
+
+    def asset_library_markdown(self, library: AssetLibrary) -> str:
+        """Export a human-readable asset library summary."""
+
+        return asset_library_markdown(library)
+
+    def latest_scene_versions(self, library: AssetLibrary):
+        """Return the latest scene versions from an asset library."""
+
+        return latest_scene_versions(library)
+
+    def latest_project_versions(self, library: AssetLibrary):
+        """Return the latest project versions from an asset library."""
+
+        return latest_project_versions(library)
+
+    def write_asset_library(
+        self,
+        library: AssetLibrary,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write asset library outputs to disk."""
+
+        return write_asset_library(library, output_dir)
