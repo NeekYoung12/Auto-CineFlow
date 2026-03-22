@@ -1,571 +1,123 @@
 # Auto-CineFlow
 
-Auto-CineFlow is an LLM-driven cinematic storyboard generator for 1-2 character scenes. It converts scene descriptions into structured shot plans, render-ready prompts, geometry-safe blocking, and downstream delivery assets for image, video, and editorial workflows.
+Auto-CineFlow is a previs-oriented cinematic production pipeline for 1-2 character scenes. It starts from a short scene description and produces:
 
-## Core Capabilities
+- structured storyboard shots
+- character and scene consistency packages
+- provider-specific payload bundles
+- real image/video generation runs
+- QA, repair, and delivery artifacts
 
-- Stable character state with immutable `CHAR_A` / `CHAR_B` visual anchors
-- 180-degree axis protection with scene-space camera placement
-- Shot planning across `MASTER_SHOT`, `MEDIUM_SHOT`, `MCU`, `CLOSE_UP`, and `OVER_SHOULDER`
-- Semantic mapping from scene emotion to lighting, motion, and escalation
-- Narrative beat planning across `ESTABLISH`, `RELATION`, `BUILD`, `ESCALATION`, `REACTION`, and `RESOLUTION`
-- English and Chinese scene parsing with dialogue extraction
-- Prompt assembly for Stable Diffusion-style image/video workflows
-- Local reference retrieval over existing character sheets, storyboard outputs, and film clips
-- Character consistency packaging with reference portraits, multiview prompts, and FaceID-compatible descriptors
-- Delivery packaging to manifest JSON, shot list CSV, render queue JSON, and editorial EDL
-- Provider bundles for Automatic1111, ComfyUI, RunningHub FaceID workflows, and Volcengine Seedream reference jobs
-- Acceptance and production-readiness reports
+The current codebase is no longer only a storyboard generator. It is a working previs production system with real integrations for:
 
-## Architecture
+- MiniMax image generation
+- MiniMax video generation
+- Volcengine Seedream image generation
+- RunningHub keyframe generation
+- RunningHub video generation
+- RunningHub AI post-enhancement
+- local FFmpeg video enhancement
 
-```text
-[Parser Filter]  ->  [Director Filter]  ->  [Geometry Filter]  ->  [Formatter Filter]  ->  [Delivery Layer]
-script_analyzer       director_logic         spatial_solver          prompt_builder         delivery
-```
+## Docs Index
 
-## Setup With uv
+- [DESIGN.md](./DESIGN.md): current product and technical design baseline
+- [CURRENT_ARCHITECTURE.md](./docs/CURRENT_ARCHITECTURE.md): module map and pipeline graph
+- [PRODUCTION_RUNBOOK.md](./docs/PRODUCTION_RUNBOOK.md): operational commands, config, and recovery usage
+
+## Current Pipeline
+
+At a high level, one scene can flow through these stages:
+
+1. `script_analyzer` parses the scene into characters, emotion, dialogue, location, and tags.
+2. `director_logic` and `spatial_solver` generate shot sequencing, lensing, geometry, and blocking.
+3. `prompt_builder` assembles render prompts and negative prompts.
+4. `consistency` and `reference_rag` retrieve character and scene references from local libraries.
+5. `delivery` packages the scene into production assets.
+6. `submission` sends jobs to the selected backend.
+7. `result_ingest` downloads outputs and syncs render manifests.
+8. `keyframe_qa`, optional `local_visual_review`, and `keyframe_gate` decide whether keyframes can continue into video.
+9. `video_enhance` and optional RunningHub post-enhance improve finished clips.
+10. `sequence_assembly` and `sequence_qa` assemble and validate longer previs sequences.
+
+## Core Modules
+
+- `script_analyzer.py`
+- `director_logic.py`
+- `spatial_solver.py`
+- `prompt_builder.py`
+- `consistency.py`
+- `reference_rag.py`
+- `delivery.py`
+- `submission.py`
+- `runninghub_backend.py`
+- `result_ingest.py`
+- `keyframe_qa.py`
+- `keyframe_gate.py`
+- `local_visual_review.py`
+- `video_enhance.py`
+- `sequence_assembly.py`
+- `sequence_qa.py`
+- `asset_library.py`
+- `project_dashboard.py`
+
+## Provider Support
+
+### Real backends
+
+- `minimax_image` + `minimax_api`
+- `minimax_video` + `minimax_api`
+- `volcengine_seedream` + `volcengine_ark`
+- `runninghub_faceid` + `runninghub_api`
+- `runninghub_video_auto` + `runninghub_api`
+- `runninghub_video_quality` + `runninghub_api`
+- `runninghub_video_fast` + `runninghub_api`
+
+### Provider payload exports
+
+Every delivery package also exports offline payload bundles for:
+
+- Automatic1111
+- ComfyUI
+- RunningHub keyframe workflows
+- RunningHub video workflows
+- Volcengine Seedream
+
+## Setup
 
 ```bash
 python -m uv venv .venv
 python -m uv sync --extra dev
 ```
 
-LLM-backed parsing can resolve credentials from:
-
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- an explicit `config_path`
-- a sibling workspace config file such as `../config/conf`
-
-The loader normalizes common gateway URLs to an OpenAI-compatible `/v1` endpoint automatically.
-
-## Quick Start
-
-```python
-from autocineflow.pipeline import CineFlowPipeline
-
-pipeline = CineFlowPipeline()
-
-ctx = pipeline.run(
-    description=(
-        "A man in black coat faces a woman in red dress across a tavern table. "
-        "He suddenly slams the glass down and erupts in anger."
-    ),
-    num_shots=5,
-    use_llm=False,
-)
-
-print(pipeline.to_json(ctx, indent=2))
-print(pipeline.controlnet_coords(ctx))
-print(pipeline.acceptance_report(ctx))
-print(pipeline.production_readiness_report(ctx))
-```
-
-## Delivery Package
-
-```python
-package = pipeline.build_storyboard_package(ctx, project_name="Feature Previs")
-
-print(pipeline.storyboard_package_json(package, indent=2))
-print(pipeline.shotlist_csv(package))
-print(pipeline.render_queue_json(package, indent=2))
-print(pipeline.edl_text(package))
-
-pipeline.write_delivery_package(package, "out/feature_previs_scene_01")
-```
-
-Each packaged shot includes:
-
-- stable `shot_id` such as `SCENE_01_SH001`
-- `timeline_in` / `timeline_out` SMPTE-style timecodes
-- editorial duration and frame count
-- deterministic `render_seed` for reproducible generation
-- `reference_shot_id` and `continuity_group` for continuity chaining
-- render prompt and negative prompt
-- ControlNet-compatible points
-- staging and nose-room notes
-- optional character reference images, scene reference images, and identity prompt suffixes
-
-The package also includes a `character_bible` with per-character continuity tags and default seeds.
-For human review, the exporter also writes a `storyboard_review.md` document.
-Provider-oriented files are also written for downstream generators.
-It also writes a `render_manifest_template.json` file for downstream render tracking and QA.
-When consistency retrieval is enabled, it also writes a `consistency/consistency_package.json` and `consistency/consistency_review.md`.
-
-## Validation
-
-```python
-report = pipeline.acceptance_report(ctx)
-assert report["logic_axis_consistency"]
-assert report["logic_gaze_direction"]
-assert report["data_required_fields"]
-assert report["data_visual_anchor_consistency"]
-assert report["interface_prompt_quality"]
-assert report["interface_controlnet_coords"]
-
-production = pipeline.production_readiness_report(ctx)
-assert all(production.values())
-```
-
-## Run Tests
+Run tests:
 
 ```bash
 python -m uv run pytest
 ```
 
-## Run Online Production Evaluation
+## Config
 
-```bash
-python -m uv run python -m autocineflow.production_eval --config-path D:\Codex\workspace\config\conf --fail-on-readiness
-```
+The pipeline resolves credentials from `config/conf` or explicit `--config-path`.
 
-## Package A Scene From The CLI
+Current supported config sections:
 
-```bash
-python -m uv run python -m autocineflow.delivery ^
-  --description "A detective in a rain-soaked trench coat faces a wounded informant in a neon alley." ^
-  --scene-id SCENE_07 ^
-  --project-name "Feature Previs" ^
-  --output-dir out\scene_07 ^
-  --config-path D:\Codex\workspace\config\conf
-```
+- `MiniMax:`
+- `Image or Video Generation:`
+- `Kimi-Code:`
+- `OpenRouter:`
+- `OPENAI RELATED:`
+- `RunningHUB:`
+- `volcengine:`
+- `Local Visual Review:`
 
-This writes:
+### RunningHub requirements
 
-- `storyboard_package.json`
-- `shotlist.csv`
-- `render_queue.json`
-- `character_bible.json`
-- `timeline.edl`
-- `storyboard_review.md`
-- `providers/automatic1111_txt2img.json`
-- `providers/comfyui_prompt_bundle.json`
-- `providers/runninghub_faceid_bundle.json`
-- `providers/runninghub_workflow_suite.json`
-- `providers/runninghub_video_auto_bundle.json`
-- `providers/runninghub_video_quality_bundle.json`
-- `providers/runninghub_video_fast_bundle.json`
-- `providers/volcengine_seedream_bundle.json`
-- `consistency/consistency_package.json`
-- `consistency/consistency_review.md`
-- `render_manifest_template.json`
+For full RunningHub automation, both of these are required:
 
-## Consistency RAG
+1. workflow IDs in `RunningHUB:`
+2. exported API-format workflow JSON files in `RUNNINGHUB_API_FORMAT_DIR`
 
-Auto-CineFlow can now scan local reference roots after storyboard generation and assemble a production-ready consistency package:
-
-- character candidate retrieval from prior character sheets and portrait libraries
-- scene candidate retrieval from prior storyboard outputs and film/report assets
-- fused identity prompts that preserve face, makeup, and wardrobe traits
-- multiview prompts for character turnaround generation
-- FaceID-compatible surrogate descriptors for downstream IP-Adapter / PuLID / FaceID workflows
-
-By default, `scene_runner` and `project_batch` will scan:
-
-- `out/`
-- `../video-studio-system/ai_film_studio/assets`
-- `../video-studio-system/runtime_outputs`
-
-You can override these roots explicitly:
-
-```bash
-python -m uv run python -m autocineflow.scene_runner ^
-  --description "A detective in a rain-soaked trench coat confronts a wounded informant in a neon alley at night." ^
-  --scene-id SCENE_CONSISTENCY ^
-  --output-dir out\scene_consistency ^
-  --provider automatic1111 ^
-  --backend dry_run ^
-  --offline ^
-  --skip-download ^
-  --reference-root D:\Codex\workspace\Auto-CineFlow\out ^
-  --reference-root D:\Codex\workspace\video-studio-system\ai_film_studio\assets
-```
-
-Use `--disable-consistency-rag` if you want the old behavior without reference retrieval.
-
-The delivery package now also exports a curated RunningHub workflow suite:
-
-- `runninghub_workflow_suite.json`: recommended private workflow registry for character, scene, repair, and video tasks
-- `runninghub_video_auto_bundle.json`: default video plan using `wan2.2_14B官方版本_全功能`
-- `runninghub_video_quality_bundle.json`: hero-shot plan using `wan2.1图生视频（高清放大+补帧）`
-- `runninghub_video_fast_bundle.json`: fast previz plan using the Framepack F1 image-to-video workflow
-
-## Render QA
-
-After a renderer fills the manifest with actual output metadata, run:
-
-```bash
-python -m uv run python -m autocineflow.render_qa ^
-  --package-file out\scene_10\storyboard_package.json ^
-  --manifest-file out\scene_10\render_manifest_template.json ^
-  --output-dir out\scene_10\qa
-```
-
-This writes:
-
-- `render_qa_report.json`
-- `render_qa_review.md`
-
-## Project Render QA
-
-To aggregate render QA across all scene folders in a project:
-
-```bash
-python -m uv run python -m autocineflow.project_render_qa ^
-  --project-file out\feature_previs\project_manifest.json ^
-  --scenes-dir out\feature_previs\scenes ^
-  --output-dir out\feature_previs\project_qa
-```
-
-This writes:
-
-- `project_render_qa_report.json`
-- `project_render_qa_review.md`
-
-## Project Batch Packaging
-
-```bash
-python -m uv run python -m autocineflow.project_batch ^
-  --input-file scenes.json ^
-  --project-name "Feature Previs" ^
-  --output-dir out\feature_previs ^
-  --config-path D:\Codex\workspace\config\conf
-```
-
-The batch input is a JSON array or an object with a `scenes` array:
-
-```json
-[
-  {
-    "scene_id": "SCENE_A",
-    "description": "A man in black coat faces a woman in red dress across a tavern table.",
-    "num_shots": 5,
-    "emotion_override": "tense"
-  }
-]
-```
-
-The batch exporter writes:
-
-- `project_manifest.json`
-- `project_shotlist.csv`
-- `project_review.md`
-- `scenes/<scene-id>/...` with per-scene delivery assets
-
-## Incremental Rerender Planning
-
-When you have a previous and current project manifest, you can generate a rerender diff:
-
-```bash
-python -m uv run python -m autocineflow.change_planner ^
-  --previous-project out\feature_previs_v1\project_manifest.json ^
-  --current-project out\feature_previs_v2\project_manifest.json ^
-  --output-dir out\feature_previs_diff
-```
-
-This writes:
-
-- `project_change_plan.json`
-- `project_change_review.md`
-- `rerender_queue.json`
-
-## Reuse-Aware Execution Planning
-
-If you also have previous scene export folders with completed render manifests, you can build a reuse-aware execution plan:
-
-```bash
-python -m uv run python -m autocineflow.execution_planner ^
-  --previous-project out\feature_previs_v1\project_manifest.json ^
-  --current-project out\feature_previs_v2\project_manifest.json ^
-  --previous-scenes-dir out\feature_previs_v1\scenes ^
-  --output-dir out\feature_previs_execution
-```
-
-This writes:
-
-- `project_execution_plan.json`
-- `project_execution_review.md`
-- `reuse_manifest.json`
-- `rerender_queue.json`
-- `ordered_rerender_queue.json`
-
-## Project Dashboard
-
-To generate one top-level dashboard from project metadata, project render QA, and execution planning:
-
-```bash
-python -m uv run python -m autocineflow.project_dashboard ^
-  --project-file out\feature_previs\project_manifest.json ^
-  --render-qa-file out\feature_previs\project_qa\project_render_qa_report.json ^
-  --execution-plan-file out\feature_previs_execution\project_execution_plan.json ^
-  --output-dir out\feature_previs_dashboard
-```
-
-This writes:
-
-- `project_dashboard.json`
-- `project_dashboard.md`
-
-## Asset Library
-
-To index all generated scene and project outputs under an `out/` root:
-
-```bash
-python -m uv run python -m autocineflow.asset_library ^
-  --root-dir out ^
-  --output-dir out\asset_library
-```
-
-This writes:
-
-- `asset_library.json`
-- `asset_library.md`
-
-## Task Submission
-
-To turn a scene package into submit-ready render tasks and queue them to a local spool:
-
-```bash
-python -m uv run python -m autocineflow.submission ^
-  --package-file out\scene_10\storyboard_package.json ^
-  --provider automatic1111 ^
-  --backend filesystem ^
-  --spool-dir out\submission_spool ^
-  --output-dir out\submission_records
-```
-
-For project execution plans you can submit only the ordered rerender queue:
-
-```bash
-python -m uv run python -m autocineflow.submission ^
-  --execution-plan-file out\feature_previs_execution\project_execution_plan.json ^
-  --backend dry_run ^
-  --output-dir out\submission_preview
-```
-
-This writes:
-
-- `submission_batch.json`
-- `submission_batch.md`
-
-You can also submit directly to MiniMax image generation if your config file contains a valid media API key:
-
-```bash
-python -m uv run python -m autocineflow.submission ^
-  --package-file out\scene_10\storyboard_package.json ^
-  --provider minimax_image ^
-  --backend minimax_api ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --output-dir out\submission_records ^
-  --spool-dir ""
-```
-
-MiniMax text-to-video is also supported:
-
-```bash
-python -m uv run python -m autocineflow.submission ^
-  --package-file out\scene_10\storyboard_package.json ^
-  --provider minimax_video ^
-  --backend minimax_api ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --output-dir out\submission_records
-```
-
-Volcengine Seedream image generation is also supported:
-
-```bash
-python -m uv run python -m autocineflow.submission ^
-  --package-file out\scene_10\storyboard_package.json ^
-  --provider volcengine_seedream ^
-  --backend volcengine_ark ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --output-dir out\submission_records
-```
-
-RunningHub private workflows are now supported for both image keyframes and video clips once your `workflowId` values and exported API-format JSON files are in place.
-
-## End-to-End Scene Runner
-
-To run one scene through generation, packaging, MiniMax submission, artifact download, and render QA:
-
-```bash
-python -m uv run python -m autocineflow.scene_runner ^
-  --description "A detective faces a wounded informant in a neon alley at night." ^
-  --scene-id SCENE_20 ^
-  --output-dir out\scene_20_run ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --provider minimax_image ^
-  --backend minimax_api ^
-  --target-duration-seconds 40 ^
-  --clip-duration-seconds 4 ^
-  --job-limit 1
-```
-
-For MiniMax text-to-video, swap `--provider minimax_video`.
-For Volcengine image generation, use `--provider volcengine_seedream --backend volcengine_ark`.
-For RunningHub keyframe generation, use `--provider runninghub_faceid --backend runninghub_api`.
-For RunningHub video generation, use `--provider runninghub_video_auto --backend runninghub_api`.
-
-For offline consistency-package generation only, use a dry-run backend such as `automatic1111 + dry_run` or `comfyui + dry_run`. The run will still emit:
-
-- `delivery/consistency/consistency_package.json`
-- `delivery/providers/runninghub_faceid_bundle.json`
-- `delivery/providers/volcengine_seedream_bundle.json`
-
-When `runninghub_video_auto` / `runninghub_video_quality` / `runninghub_video_fast` is used with `runninghub_api`, `scene_runner` will first generate bootstrap keyframes through `runninghub_faceid` and then inject those freshly rendered frames into the video workflow. Use `--disable-runninghub-bootstrap` to skip that step.
-
-The RunningHub video path now includes two optional quality stages:
-
-- keyframe rebuild before video generation
-  - bootstrap keyframe -> rebuilt keyframe -> video
-  - disable with `--disable-runninghub-keyframe-rebuild`
-- local video enhancement after download
-  - denoise + upscale + sharpen + light grading
-  - disable with `--disable-video-enhance`
-
-If you later add an optional RunningHub AI video-enhancement workflow, Auto-CineFlow can run that stage before the local FFmpeg fallback. The expected config key is:
-
-```text
-RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1=workflowId
-```
-
-## Local Visual Review
-
-Auto-CineFlow can also run an optional local visual review pass on keyframes before they enter the video stage. This is designed as a low-priority, yield-to-other-processes step:
-
-- it runs in an external Python environment
-- it can reuse a local Qwen-VL model
-- if GPU memory is tight, it returns `skipped` instead of blocking the production pipeline
-
-Default paths:
-
-```text
-PYTHON_PATH=C:\Users\neekyoung12\Documents\ComfyUI\.venv\Scripts\python.exe
-MODEL_PATH=D:\ComfyUI_ws\ComfyUI_Models\models\LLM\Qwen-VL\Huihui-Qwen3-VL-4B-Instruct-abliterated
-DEVICE_PREFERENCE=cuda
-MIN_FREE_VRAM_GB=4
-```
-
-You can override them in `conf`:
-
-```text
-Local Visual Review:
-PYTHON_PATH=C:\Users\neekyoung12\Documents\ComfyUI\.venv\Scripts\python.exe
-MODEL_PATH=D:\ComfyUI_ws\ComfyUI_Models\models\LLM\Qwen-VL\Huihui-Qwen3-VL-4B-Instruct-abliterated
-DEVICE_PREFERENCE=cuda
-MIN_FREE_VRAM_GB=4
-```
-
-Enable it explicitly in `scene_runner`:
-
-```bash
-python -m uv run python -m autocineflow.scene_runner ^
-  --description "..." ^
-  --scene-id SCENE_VLM ^
-  --output-dir out\scene_vlm ^
-  --provider runninghub_video_auto ^
-  --backend runninghub_api ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --enable-local-vlm-review
-```
-
-You can also review an existing keyframe directory without rerunning the whole scene pipeline:
-
-```bash
-python -m uv run python -m autocineflow.local_visual_review ^
-  --artifacts-dir out\scene_runninghub_rebuild_prod\rebuild_keyframes\artifacts ^
-  --source-id SCENE_RUNNINGHUB_REBUILD_PROD ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --output-dir out\scene_runninghub_rebuild_prod\local_visual_review
-```
-
-If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
-
-```bash
-python -m uv run python -m autocineflow.scene_resume ^
-  --run-dir out\scene_40s_full_v2 ^
-  --config-path D:\Codex\workspace\config\conf
-```
-
-To rerender only the failed clips from `sequence_repair_plan.json`:
-
-```bash
-python -m uv run python -m autocineflow.scene_repair ^
-  --run-dir out\scene_40s_full_v2 ^
-  --config-path D:\Codex\workspace\config\conf
-```
-
-To rerun only the keyframe stages for a scene blocked before video generation:
-
-```bash
-python -m uv run python -m autocineflow.scene_keyframe_repair ^
-  --run-dir out\scene_runninghub_rebuild_prod ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --enable-local-vlm-review
-```
-
-## Submission Monitoring
-
-For filesystem-backed queues you can monitor batch progress:
-
-```bash
-python -m uv run python -m autocineflow.submission_monitor ^
-  --batch-file out\submission_records\submission_batch.json ^
-  --spool-dir out\submission_spool ^
-  --output-dir out\submission_monitor
-```
-
-This writes:
-
-- `submission_monitor_report.json`
-- `submission_monitor_report.md`
-
-## Recovery Planning
-
-To turn provider failures into actions such as pause, retry, or manual fix:
-
-```bash
-python -m uv run python -m autocineflow.recovery_policy ^
-  --batch-file out\scene_40s_full_v2\repair_submission\submission_batch.json ^
-  --output-dir out\scene_40s_full_v2\recovery
-```
-
-This writes:
-
-- `recovery_plan.json`
-- `recovery_plan.md`
-
-## Provider Probe
-
-To verify provider readiness from the local config:
-
-```bash
-python -m uv run python -m autocineflow.provider_probe ^
-  --config-path D:\Codex\workspace\config\conf ^
-  --output-dir out\provider_probe
-```
-
-This currently checks:
-
-- Volcengine ARK config presence and normalized endpoint
-- RunningHub account status through the official account-status API
-- RunningHub workflow IDs and local API export JSON readiness
-
-For private RunningHub workflows, `workflowId` alone is not enough for full automation. The pipeline also expects each workflow's exported API-format JSON so it can map prompts, images, and other node values into `nodeInfoList`.
-
-By default, Auto-CineFlow will look for these files under:
-
-- `D:\Codex\workspace\config\runninghub_api_formats\`
-
-You can override that by adding this to `conf`:
-
-```text
-RunningHUB:
-RUNNINGHUB_API_FORMAT_DIR=D:\Codex\workspace\config\runninghub_api_formats
-```
-
-Expected filenames:
+Expected standard filenames:
 
 - `rh_char_identity_forge_v1.json`
 - `rh_char_sheet_multiview_v1.json`
@@ -576,3 +128,119 @@ Expected filenames:
 - `rh_shot_i2v_wan22_full_v1.json`
 - `rh_shot_i2v_wan21_hq_v1.json`
 - `rh_shot_i2v_framepack_fast_v1.json`
+- `rh_video_post_enhance_v1.json`
+
+### Local visual review
+
+Default local visual review runtime:
+
+- Python:
+  `C:\Users\neekyoung12\Documents\ComfyUI\.venv\Scripts\python.exe`
+- Model:
+  `D:\ComfyUI_ws\ComfyUI_Models\models\LLM\Qwen-VL\Huihui-Qwen3-VL-4B-Instruct-abliterated`
+
+This review stage is intentionally optional and low-priority:
+
+- it is disabled unless explicitly requested
+- it runs in an external Python process
+- it skips rather than blocking when GPU memory is too tight
+
+## Common Commands
+
+### Scene delivery only
+
+```bash
+python -m uv run python -m autocineflow.delivery ^
+  --description "A detective in a rain-soaked trench coat faces a wounded informant in a neon alley." ^
+  --scene-id SCENE_07 ^
+  --project-name "Feature Previs" ^
+  --output-dir out\scene_07 ^
+  --config-path D:\Codex\workspace\config\conf
+```
+
+### End-to-end scene run
+
+```bash
+python -m uv run python -m autocineflow.scene_runner ^
+  --description "A detective faces a wounded informant in a neon alley at night." ^
+  --scene-id SCENE_20 ^
+  --output-dir out\scene_20_run ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --provider runninghub_video_auto ^
+  --backend runninghub_api
+```
+
+### Keyframe-only repair
+
+```bash
+python -m uv run python -m autocineflow.scene_keyframe_repair ^
+  --run-dir out\scene_runninghub_rebuild_prod ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --enable-local-vlm-review ^
+  --continue-video
+```
+
+### Standalone keyframe visual review
+
+```bash
+python -m uv run python -m autocineflow.local_visual_review ^
+  --artifacts-dir out\scene_runninghub_rebuild_prod\rebuild_keyframes\artifacts ^
+  --source-id SCENE_RUNNINGHUB_REBUILD_PROD ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --output-dir out\scene_runninghub_rebuild_prod\local_visual_review
+```
+
+### Project dashboard
+
+```bash
+python -m uv run python -m autocineflow.project_dashboard ^
+  --project-file out\feature_previs\project_manifest.json ^
+  --render-qa-file out\feature_previs\project_qa\project_render_qa_report.json ^
+  --execution-plan-file out\feature_previs_execution\project_execution_plan.json ^
+  --output-dir out\feature_previs_dashboard
+```
+
+### Provider probe
+
+```bash
+python -m uv run python -m autocineflow.provider_probe ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --output-dir out\provider_probe
+```
+
+## Current Quality Strategy
+
+The current production strategy for RunningHub scenes is:
+
+- prefer external reference assets over previously generated `out/` frames
+- generate bootstrap keyframes first
+- rebuild keyframes with stronger prompts before video
+- run heuristic keyframe QA
+- optionally run local visual review with local Qwen-VL
+- build a unified keyframe gate
+- block video generation when the gate fails unless explicitly overridden
+- run video generation
+- optionally run RunningHub AI post-enhancement
+- run local FFmpeg enhancement as fallback/final polish
+
+## Current Limitations
+
+- local visual review is optional and not yet enabled by default
+- keyframe gate currently uses heuristic QA plus optional local visual review, but not yet a mandatory multimodal judge on every run
+- some RunningHub post-enhancement jobs can still fail under remote GPU memory pressure
+- project-level resumability is stronger for scene/video artifacts than for keyframe gate iterations
+
+## Development Notes
+
+When continuing development, treat these as the current priorities:
+
+1. keep keyframe quality ahead of video spend
+2. avoid feeding generated artifacts back into reference retrieval unless explicitly intended
+3. prefer structured gate outputs over ad hoc status checks
+4. keep provider integrations resumable and diagnosable
+5. preserve a clean split between:
+   - scene planning
+   - keyframe generation
+   - video generation
+   - post-enhancement
+   - QA and repair

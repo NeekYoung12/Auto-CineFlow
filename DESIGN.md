@@ -1,77 +1,254 @@
-## 📄 第一部分：需求文档 (PRD)
+# Auto-CineFlow Design
 
-### 1. 项目目标
-构建一个由 LLM 驱动的影视分镜参数生成器。输入一段 1-2 人的故事叙述，输出符合电影工业标准的结构化指令集（JSON），用于驱动后续的 AI 绘图与视频工作流。
+## Purpose
 
-### 2. 核心用户场景 (User Stories)
-* **场景 A：** 用户输入“两人在酒馆对坐”，系统需自动生成 Master Shot（全景）建立空间，并锁定两人的左右位置。
-* **场景 B：** 角色情绪爆发时，系统需自动识别并切换至 Close-up（特写），同时调整焦距参数和构图重心。
+Auto-CineFlow is a previs production pipeline for short narrative scenes with one or two primary characters. The system is designed to produce industrially usable storyboard, keyframe, video, and QA assets rather than only prompt text.
 
-### 3. 功能需求清单
-* **[REQ-01] 角色状态机：** 自动维护 1-2 个角色的 ID、定妆特征（Visual Anchor）和当前坐标。
-* **[REQ-02] 轴线守护逻辑：** 强制所有机位处于关系轴线的一侧，严禁出现逻辑上的“跳轴”。
-* **[REQ-03] 镜头模版库：** 内置全景、过肩、特写等标准工业机位。
-* **[REQ-04] 语义-参数映射：** 将形容词（如“愤怒”）映射为具体数值（如 `contrast: 0.8`, `motion: 0.7`）。
+## Design Goals
 
----
+### 1. Cinematic correctness
 
-## 🏗️ 第二部分：设计文档 (TDD)
+- maintain a stable 180-degree axis unless a scene reset is intentional
+- keep screen direction and eyelines coherent
+- preserve character visual anchors through the full scene
+- generate shot progressions that read like film coverage, not random image prompts
 
-### 1. 系统架构图
-系统采用 **Pipe-and-Filter (管道-过滤器)** 架构：
-1. **Parser Filter:** 提取实体与对白。
-2. **Director Filter:** 决定镜头序列与机位类型。
-3. **Geometry Filter:** 计算 180° 轴线与归一化坐标。
-4. **Formatter Filter:** 组装最终 JSON 协议。
+### 2. Production continuity
 
-### 2. 核心算法逻辑 (Copilot 开发重点)
+- assign deterministic shot IDs and render seeds
+- export continuity metadata such as `reference_shot_id` and `continuity_group`
+- keep character identity, wardrobe, makeup, and face cues stable through local reference retrieval and downstream workflow guidance
 
-#### A. 180° 轴线计算逻辑 (Vector-Based)
-```python
-# 伪代码：用于校验机位是否跳轴
-def is_valid_shot(previous_cam_pos, current_cam_pos, axis_vector):
-    # 核心逻辑：判断两个机位相对于轴向量的点积符号是否一致
-    # 确保相机始终在轴线的同一半圆平面内
-    return sign(cross_product(previous_cam_pos, axis_vector)) == sign(cross_product(current_cam_pos, axis_vector))
-```
+### 3. Real backend execution
 
-#### B. 构图坐标归一化
-* 定义画布为 $1.0 \times 1.0$ 的坐标系。
-* **规则：** 主体在 MCU 景别下，面部中心点应位于 $(0.33, 0.4)$ 或 $(0.66, 0.4)$，预留视线余留（Nose Room）。
+The system must be able to move from planning to actual provider execution. Current real backends:
 
-### 3. 数据库/字典结构
-* **Shot_Templates:** 存储不同景别对应的焦距（24mm, 35mm, 50mm, 85mm）预设。
-* **Emotion_Matrix:** 情感关键词到图像参数（色彩饱和度、光影对比度）的映射表。
+- MiniMax image
+- MiniMax video
+- Volcengine Seedream image
+- RunningHub keyframe generation
+- RunningHub video generation
+- RunningHub AI video post-enhancement
 
----
+### 4. Quality gates before scale
 
-## 🛠️ 第三部分：实现方案 (Implementation)
+The pipeline should not spend video generation budget on low-quality keyframes. Keyframe quality is therefore treated as a gate, not just a report.
 
-### 1. 技术栈建议
-* **语言：** Python 3.10+ (利于处理 JSON 和数学计算)。
-* **逻辑大脑：** GPT-4o API (作为主要的逻辑解析器)。
-* **Schema 校验：** Pydantic (确保输出的 JSON 严格符合格式)。
+## Current System Architecture
 
-### 2. 关键函数模块划分
-1. `script_analyzer.py`: 负责与 LLM 交互，初步拆解剧本。
-2. `director_logic.py`: 核心调度逻辑，根据上下文选择 Shot Type。
-3. `spatial_solver.py`: 处理所有空间几何计算和坐标映射。
-4. `prompt_builder.py`: 最终字符串拼接模版。
+### Stage A: Scene analysis
 
----
+- `script_analyzer.py`
+- `director_logic.py`
+- `spatial_solver.py`
+- `prompt_builder.py`
 
-## ✅ 第四部分：验收标准 (Acceptance Criteria)
+Inputs:
 
-为确保生成的代码符合预期，请使用以下标准进行验收：
+- scene description
+- optional LLM configuration
 
-### 1. 逻辑准确性验收 (Logic Pass)
-* [ ] **轴线一致性：** 连续 5 个镜头的 JSON 输出中，`axis_side` 参数必须保持恒定（除非场景重置）。
-* [ ] **视线逻辑：** 若 A 看着 B，且 A 在左侧，则 A 的 `facing` 参数必须为 `RIGHT`。
+Outputs:
 
-### 2. 数据完备性验收 (Data Pass)
-* [ ] **必填项检查：** 每个 `Shot_Block` 必须包含 `framing`, `camera_angle`, `lighting`, `motion_instruction` 四个核心对象。
-* [ ] **ID 一致性：** `CHAR_A` 的视觉特征描述在整个 JSON 序列中必须 100% 字符级匹配。
+- `SceneContext`
+- beat plan
+- shot blocks
+- render prompts
 
-### 3. 渲染兼容性验收 (Interface Pass)
-* [ ] **Prompt 质量：** 生成的 Prompt 放入开源 SD 工作流，能够直接渲染出对应景别的图像，无需人工修改词汇。
-* [ ] **坐标可用性：** `pos` 坐标参数可被直接映射为 ControlNet 的坐标点。
+### Stage B: Consistency and delivery
+
+- `reference_rag.py`
+- `consistency.py`
+- `delivery.py`
+- `provider_payloads.py`
+
+Inputs:
+
+- `SceneContext`
+- local reference roots
+
+Outputs:
+
+- `StoryboardPackage`
+- consistency package
+- provider payload bundles
+- render manifest template
+- sequence assembly plan
+
+### Stage C: Execution
+
+- `submission.py`
+- `runninghub_backend.py`
+- `result_ingest.py`
+
+Responsibilities:
+
+- submit jobs to providers
+- upload local inputs when required
+- poll provider outputs
+- download final assets
+- sync render manifests
+
+### Stage D: Quality control
+
+- `keyframe_qa.py`
+- `local_visual_review.py`
+- `keyframe_gate.py`
+- `render_qa.py`
+- `sequence_qa.py`
+- `video_enhance.py`
+
+Responsibilities:
+
+- evaluate keyframe quality before video generation
+- optionally run local VLM image review
+- merge QA and visual review into a single keyframe gate
+- evaluate render correctness
+- evaluate assembled sequence correctness
+- apply local video enhancement when needed
+
+### Stage E: Oversight and project control
+
+- `asset_library.py`
+- `project_dashboard.py`
+- `project_render_qa.py`
+- `change_planner.py`
+- `execution_planner.py`
+
+Responsibilities:
+
+- aggregate multi-scene outputs
+- surface blocking states
+- track reuse vs rerender
+- preserve historical run visibility
+
+## Key Data Objects
+
+### `SceneContext`
+
+The in-memory planning object containing:
+
+- parsed characters
+- emotion
+- dialogue
+- location
+- tags
+- shot blocks
+
+### `StoryboardPackage`
+
+The main delivery package containing:
+
+- shot list
+- render queue
+- video segments
+- character bible
+- consistency package
+- readiness and quality reports
+
+### `ConsistencyPackage`
+
+The character/scene reference package containing:
+
+- character candidates
+- scene candidates
+- fusion plans
+- multiview prompts
+- face-compatible descriptors
+- shot-level reference bundles
+
+### `KeyframeGateReport`
+
+The unified decision object that decides whether a scene may continue into video generation.
+
+Inputs:
+
+- heuristic keyframe QA
+- optional local visual review
+
+Outputs:
+
+- per-shot pass/block
+- blocking reason
+- recommendation
+
+## RunningHub Design
+
+### Keyframe path
+
+1. `runninghub_faceid` bootstrap keyframe
+2. rebuild keyframe with stronger prompts
+3. optional repair-rebuild when keyframe QA finds problems
+4. optional local visual review
+5. unified keyframe gate
+
+### Video path
+
+1. choose video workflow bundle:
+   - `runninghub_video_auto`
+   - `runninghub_video_quality`
+   - `runninghub_video_fast`
+2. inject selected keyframe as the first-frame candidate
+3. run video generation
+4. optional RunningHub AI post-enhancement
+5. local FFmpeg enhancement fallback/final polish
+
+### RunningHub workflow naming
+
+Expected workflow keys:
+
+- `rh_char_identity_forge_v1`
+- `rh_char_sheet_multiview_v1`
+- `rh_scene_set_forge_v1`
+- `rh_shot_keyframe_faceid_v1`
+- `rh_shot_relight_match_v1`
+- `rh_shot_repair_inpaint_v1`
+- `rh_shot_i2v_wan22_full_v1`
+- `rh_shot_i2v_wan21_hq_v1`
+- `rh_shot_i2v_framepack_fast_v1`
+- `rh_video_post_enhance_v1`
+
+## Local Visual Review Design
+
+The local visual review stage is deliberately optional.
+
+Reasons:
+
+- it depends on an external Python environment
+- it may compete for GPU memory with other active processes
+- it should yield rather than block when resources are tight
+
+Current strategy:
+
+- load Qwen-VL from a local model directory
+- run the worker in an external Python process
+- skip when runtime paths are missing or the worker decides GPU memory is too tight
+- feed the result into `KeyframeGateReport` when available
+
+## Current Acceptance Standard
+
+### Scene-level minimum
+
+- storyboard package builds successfully
+- consistency package builds successfully
+- provider payloads export correctly
+- keyframe gate is computed before RunningHub video generation
+
+### RunningHub scene minimum
+
+- bootstrap keyframe can be generated
+- keyframe rebuild can be generated
+- keyframe gate can be written
+- video generation is blocked if keyframes fail the gate
+
+### Project-level minimum
+
+- project dashboard shows storyboard, keyframe, and render states separately
+- asset library records enough metadata for later recovery and comparison
+
+## Immediate Next Priorities
+
+1. push local visual review from optional signal toward stronger automated repair decisions
+2. improve scene-level resumption so keyframe repair and video continuation become one continuous recovery loop
+3. reduce textual artifacts further by combining better masks, local review, and targeted inpaint repair
+4. make project dashboards reflect the newest gate and repair outcome automatically
