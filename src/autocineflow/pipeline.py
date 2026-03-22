@@ -70,6 +70,8 @@ from .provider_payloads import (
     automatic1111_bundle_json,
     comfyui_bundle_json,
     runninghub_faceid_bundle_json,
+    runninghub_video_bundle_json,
+    runninghub_workflow_suite_json,
     volcengine_seedream_bundle_json,
     write_provider_payloads,
 )
@@ -697,6 +699,21 @@ class CineFlowPipeline:
         """Serialise RunningHub FaceID bundles."""
 
         return runninghub_faceid_bundle_json(package, indent=indent)
+
+    def runninghub_video_bundle_json(
+        self,
+        package: StoryboardPackage,
+        mode: str = "auto",
+        indent: int = 2,
+    ) -> str:
+        """Serialise RunningHub video workflow plans."""
+
+        return runninghub_video_bundle_json(package, mode=mode, indent=indent)
+
+    def runninghub_workflow_suite_json(self, indent: int = 2) -> str:
+        """Serialise the curated RunningHub workflow suite."""
+
+        return runninghub_workflow_suite_json(indent=indent)
 
     def volcengine_seedream_bundle_json(self, package: StoryboardPackage, indent: int = 2) -> str:
         """Serialise Volcengine Seedream reference bundles."""

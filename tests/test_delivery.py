@@ -124,6 +124,10 @@ def test_write_delivery_package_creates_output_files():
             "automatic1111",
             "comfyui",
             "runninghub_faceid",
+            "runninghub_workflow_suite",
+            "runninghub_video_auto",
+            "runninghub_video_quality",
+            "runninghub_video_fast",
             "volcengine_seedream",
             "render_manifest_template",
             "assembly_json",
@@ -140,6 +144,10 @@ def test_write_delivery_package_creates_output_files():
         assert written["automatic1111"].exists()
         assert written["comfyui"].exists()
         assert written["runninghub_faceid"].exists()
+        assert written["runninghub_workflow_suite"].exists()
+        assert written["runninghub_video_auto"].exists()
+        assert written["runninghub_video_quality"].exists()
+        assert written["runninghub_video_fast"].exists()
         assert written["volcengine_seedream"].exists()
         assert written["render_manifest_template"].exists()
         assert written["assembly_json"].exists()
@@ -152,6 +160,10 @@ def test_write_delivery_package_creates_output_files():
         assert len(json.loads(written["automatic1111"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["comfyui"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["runninghub_faceid"].read_text(encoding="utf-8"))) == 5
+        assert len(json.loads(written["runninghub_workflow_suite"].read_text(encoding="utf-8"))["profiles"]) >= 8
+        assert len(json.loads(written["runninghub_video_auto"].read_text(encoding="utf-8"))) == 5
+        assert len(json.loads(written["runninghub_video_quality"].read_text(encoding="utf-8"))) == 5
+        assert len(json.loads(written["runninghub_video_fast"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["volcengine_seedream"].read_text(encoding="utf-8"))) == 5
         assert len(json.loads(written["render_manifest_template"].read_text(encoding="utf-8"))) == 5
         assert "# Delivery Test" in written["review_markdown"].read_text(encoding="utf-8")

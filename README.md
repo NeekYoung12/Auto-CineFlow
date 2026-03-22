@@ -142,6 +142,10 @@ This writes:
 - `providers/automatic1111_txt2img.json`
 - `providers/comfyui_prompt_bundle.json`
 - `providers/runninghub_faceid_bundle.json`
+- `providers/runninghub_workflow_suite.json`
+- `providers/runninghub_video_auto_bundle.json`
+- `providers/runninghub_video_quality_bundle.json`
+- `providers/runninghub_video_fast_bundle.json`
 - `providers/volcengine_seedream_bundle.json`
 - `consistency/consistency_package.json`
 - `consistency/consistency_review.md`
@@ -179,6 +183,13 @@ python -m uv run python -m autocineflow.scene_runner ^
 ```
 
 Use `--disable-consistency-rag` if you want the old behavior without reference retrieval.
+
+The delivery package now also exports a curated RunningHub workflow suite:
+
+- `runninghub_workflow_suite.json`: recommended private workflow registry for character, scene, repair, and video tasks
+- `runninghub_video_auto_bundle.json`: default video plan using `wan2.2_14B官方版本_全功能`
+- `runninghub_video_quality_bundle.json`: hero-shot plan using `wan2.1图生视频（高清放大+补帧）`
+- `runninghub_video_fast_bundle.json`: fast previz plan using the Framepack F1 image-to-video workflow
 
 ## Render QA
 

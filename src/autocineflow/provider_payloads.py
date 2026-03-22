@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .delivery import StoryboardPackage
+from .runninghub_workflows import build_runninghub_video_bundle, runninghub_workflow_suite
 
 
 def _remote_urls(paths: list[str]) -> list[str]:
@@ -192,6 +193,22 @@ def runninghub_faceid_bundle_json(package: StoryboardPackage, indent: int = 2) -
     return json.dumps(runninghub_faceid_bundle(package), indent=indent, ensure_ascii=False)
 
 
+def runninghub_video_bundle_json(package: StoryboardPackage, mode: str = "auto", indent: int = 2) -> str:
+    """Serialise RunningHub video workflow plans to JSON."""
+
+    return json.dumps(
+        [item.model_dump(mode="json") for item in build_runninghub_video_bundle(package, mode=mode)],
+        indent=indent,
+        ensure_ascii=False,
+    )
+
+
+def runninghub_workflow_suite_json(indent: int = 2) -> str:
+    """Serialise the curated RunningHub workflow suite."""
+
+    return runninghub_workflow_suite().model_dump_json(indent=indent)
+
+
 def volcengine_seedream_bundle_json(package: StoryboardPackage, indent: int = 2) -> str:
     """Serialise Volcengine Seedream bundles to JSON."""
 
@@ -207,16 +224,28 @@ def write_provider_payloads(package: StoryboardPackage, output_dir: str | Path) 
     automatic1111_path = target_dir / "automatic1111_txt2img.json"
     comfyui_path = target_dir / "comfyui_prompt_bundle.json"
     runninghub_path = target_dir / "runninghub_faceid_bundle.json"
+    runninghub_workflow_suite_path = target_dir / "runninghub_workflow_suite.json"
+    runninghub_video_auto_path = target_dir / "runninghub_video_auto_bundle.json"
+    runninghub_video_quality_path = target_dir / "runninghub_video_quality_bundle.json"
+    runninghub_video_fast_path = target_dir / "runninghub_video_fast_bundle.json"
     volcengine_path = target_dir / "volcengine_seedream_bundle.json"
 
     automatic1111_path.write_text(automatic1111_bundle_json(package, indent=2), encoding="utf-8")
     comfyui_path.write_text(comfyui_bundle_json(package, indent=2), encoding="utf-8")
     runninghub_path.write_text(runninghub_faceid_bundle_json(package, indent=2), encoding="utf-8")
+    runninghub_workflow_suite_path.write_text(runninghub_workflow_suite_json(indent=2), encoding="utf-8")
+    runninghub_video_auto_path.write_text(runninghub_video_bundle_json(package, mode="auto", indent=2), encoding="utf-8")
+    runninghub_video_quality_path.write_text(runninghub_video_bundle_json(package, mode="quality", indent=2), encoding="utf-8")
+    runninghub_video_fast_path.write_text(runninghub_video_bundle_json(package, mode="fast", indent=2), encoding="utf-8")
     volcengine_path.write_text(volcengine_seedream_bundle_json(package, indent=2), encoding="utf-8")
 
     return {
         "automatic1111": automatic1111_path,
         "comfyui": comfyui_path,
         "runninghub_faceid": runninghub_path,
+        "runninghub_workflow_suite": runninghub_workflow_suite_path,
+        "runninghub_video_auto": runninghub_video_auto_path,
+        "runninghub_video_quality": runninghub_video_quality_path,
+        "runninghub_video_fast": runninghub_video_fast_path,
         "volcengine_seedream": volcengine_path,
     }
