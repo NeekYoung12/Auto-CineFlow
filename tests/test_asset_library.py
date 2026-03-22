@@ -44,7 +44,30 @@ def test_asset_library_indexes_scene_and_project_versions():
             emotion_override="tense",
         )
         scene_package = pipeline.build_storyboard_package(scene_ctx, project_name="Library Project")
-        pipeline.write_delivery_package(scene_package, temp_dir / "scene_run")
+        scene_files = pipeline.write_delivery_package(scene_package, temp_dir / "scene_run")
+        # Add recovery metadata for indexing.
+        submission_payload = {
+            "provider": "minimax_video",
+            "job_count": 1,
+            "records": [
+                {
+                    "backend_job_id": "",
+                    "provider_status_code": 1008,
+                    "provider_status_message": "insufficient balance",
+                }
+            ],
+        }
+        (temp_dir / "scene_run" / "submission").mkdir(exist_ok=True)
+        (temp_dir / "scene_run" / "submission" / "submission_batch.json").write_text(
+            json.dumps(submission_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        recovery_payload = {"decision_count": 1, "queue_paused": True}
+        (temp_dir / "scene_run" / "recovery").mkdir(exist_ok=True)
+        (temp_dir / "scene_run" / "recovery" / "recovery_plan.json").write_text(
+            json.dumps(recovery_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         # Project output
         project = pipeline.build_project_package(
             scene_inputs=[
@@ -65,9 +88,14 @@ def test_asset_library_indexes_scene_and_project_versions():
         library = pipeline.build_asset_library(temp_dir)
         assert len(library.scene_versions) >= 2
         assert len(library.project_versions) == 1
-        assert pipeline.latest_scene_versions(library)[0].scene_id == "LIB_SCENE"
-        assert pipeline.latest_project_versions(library)[0].project_name == "Library Project"
-        assert pipeline.latest_scene_versions(library)[0].failed_submission_count == 0
+        latest_scene = pipeline.latest_scene_versions(library)[0]
+        latest_project = pipeline.latest_project_versions(library)[0]
+        assert latest_scene.scene_id == "LIB_SCENE"
+        assert latest_project.project_name == "Library Project"
+        assert any(scene.failed_submission_count == 1 for scene in library.scene_versions)
+        assert any(scene.recovery_decision_count == 1 for scene in library.scene_versions)
+        assert any(scene.queue_paused is True for scene in library.scene_versions)
+        assert latest_project.total_failed_submissions >= 0
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

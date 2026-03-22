@@ -30,6 +30,8 @@ class SceneAssetVersion(BaseModel):
     submission_count: int = Field(default=0, ge=0)
     failed_submission_count: int = Field(default=0, ge=0)
     provider_status_summary: list[str] = Field(default_factory=list)
+    recovery_decision_count: int = Field(default=0, ge=0)
+    queue_paused: bool = False
     provider: str = ""
     available_files: list[str] = Field(default_factory=list)
 
@@ -48,6 +50,8 @@ class ProjectAssetVersion(BaseModel):
     reuse_count: int = Field(default=0, ge=0)
     rerender_count: int = Field(default=0, ge=0)
     total_failed_submissions: int = Field(default=0, ge=0)
+    total_recovery_decisions: int = Field(default=0, ge=0)
+    queue_paused: bool = False
     available_files: list[str] = Field(default_factory=list)
 
 
@@ -77,16 +81,25 @@ def _scene_files(base_dir: Path) -> list[str]:
     return names
 
 
+def _scene_output_root(manifest_path: Path) -> Path:
+    """Resolve the root directory for scene-level outputs across old/new layouts."""
+
+    if manifest_path.parent.name == "delivery":
+        return manifest_path.parent.parent
+    return manifest_path.parent
+
+
 def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
     """Index one scene manifest directory into a scene asset version record."""
 
     manifest_path = Path(manifest_path)
     package = StoryboardPackage.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-    base_dir = manifest_path.parent
+    output_root = _scene_output_root(manifest_path)
 
-    render_qa_payload = _maybe_json(base_dir.parent / "qa" / "render_qa_report.json")
-    sequence_qa_payload = _maybe_json(base_dir.parent / "sequence_qc" / "sequence_qa_report.json")
-    submission_payload = _maybe_json(base_dir.parent / "submission" / "submission_batch.json")
+    render_qa_payload = _maybe_json(output_root / "qa" / "render_qa_report.json")
+    sequence_qa_payload = _maybe_json(output_root / "sequence_qc" / "sequence_qa_report.json")
+    submission_payload = _maybe_json(output_root / "submission" / "submission_batch.json")
+    recovery_payload = _maybe_json(output_root / "recovery" / "recovery_plan.json")
 
     provider = ""
     submission_count = 0
@@ -110,7 +123,7 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
         project_name=package.project_name,
         generated_at=package.generated_at,
         manifest_path=str(manifest_path),
-        output_dir=str(base_dir.parent),
+        output_dir=str(output_root),
         analysis_source=package.analysis_source,
         detected_emotion=package.detected_emotion,
         total_duration_seconds=package.total_duration_seconds,
@@ -121,8 +134,10 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
         submission_count=submission_count,
         failed_submission_count=failed_submission_count,
         provider_status_summary=provider_status_summary,
+        recovery_decision_count=int(recovery_payload.get("decision_count", 0)) if recovery_payload else 0,
+        queue_paused=bool(recovery_payload.get("queue_paused", False)) if recovery_payload else False,
         provider=provider,
-        available_files=_scene_files(base_dir.parent),
+        available_files=_scene_files(output_root),
     )
 
 
@@ -140,6 +155,8 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
     reuse_count = 0
     rerender_count = 0
     total_failed_submissions = 0
+    total_recovery_decisions = 0
+    queue_paused = False
     if dashboard_payload:
         reuse_count = int(dashboard_payload.get("total_reuse_count", 0))
         rerender_count = int(dashboard_payload.get("total_rerender_count", 0))
@@ -151,6 +168,8 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
     for manifest in scenes_dir.glob("*/storyboard_package.json"):
         scene_version = index_scene_asset_version(manifest)
         total_failed_submissions += scene_version.failed_submission_count
+        total_recovery_decisions += scene_version.recovery_decision_count
+        queue_paused = queue_paused or scene_version.queue_paused
 
     return ProjectAssetVersion(
         project_name=package.project_name,
@@ -168,6 +187,8 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
         reuse_count=reuse_count,
         rerender_count=rerender_count,
         total_failed_submissions=total_failed_submissions,
+        total_recovery_decisions=total_recovery_decisions,
+        queue_paused=queue_paused,
         available_files=_scene_files(base_dir),
     )
 
@@ -242,6 +263,8 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Render QA: `{scene.render_qa_score if scene.render_qa_score is not None else 'n/a'}`",
                 f"- Sequence QA: `{scene.sequence_qa_score if scene.sequence_qa_score is not None else 'n/a'}`",
                 f"- Failed Submissions: `{scene.failed_submission_count}`",
+                f"- Recovery Decisions: `{scene.recovery_decision_count}`",
+                f"- Queue Paused: `{scene.queue_paused}`",
                 "",
             ]
         )
@@ -258,6 +281,8 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Avg Render QA: `{project.average_render_score if project.average_render_score is not None else 'n/a'}`",
                 f"- Reuse / Rerender: `{project.reuse_count}/{project.rerender_count}`",
                 f"- Failed Submissions: `{project.total_failed_submissions}`",
+                f"- Recovery Decisions: `{project.total_recovery_decisions}`",
+                f"- Queue Paused: `{project.queue_paused}`",
                 "",
             ]
         )
