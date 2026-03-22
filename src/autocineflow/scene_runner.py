@@ -118,10 +118,25 @@ def _build_runninghub_post_enhance_jobs(downloads) -> list[SubmissionJob]:
                     "workflow_key": "rh_video_post_enhance_v1",
                     "workflow_id_env": "RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1",
                     "source_video_path": record.output_path,
+                    "new_resolution": 1024,
+                    "seed": 9527,
+                    "batch_size": 17,
                 },
             )
         )
     return jobs
+
+
+def _retry_runninghub_post_enhance_jobs(ai_jobs: list[SubmissionJob]) -> list[SubmissionJob]:
+    """Retry AI post-enhancement with more conservative memory settings."""
+
+    retried: list[SubmissionJob] = []
+    for job in ai_jobs:
+        payload = dict(job.payload)
+        payload["new_resolution"] = min(int(payload.get("new_resolution", 1024) or 1024), 768)
+        payload["batch_size"] = min(int(payload.get("batch_size", 17) or 17), 9)
+        retried.append(job.model_copy(update={"job_id": f"{job.job_id}_RETRY", "payload": payload}))
+    return retried
 
 
 def main() -> int:
@@ -373,6 +388,39 @@ def main() -> int:
                         ).items()
                     }
                 )
+                if not any(record.downloaded for record in ai_downloads.records):
+                    retry_jobs = _retry_runninghub_post_enhance_jobs(ai_jobs)
+                    retry_batch = pipeline.submit_jobs(
+                        retry_jobs,
+                        target,
+                        source_type="package_video_post_enhance_retry",
+                        source_id=package.scene_id,
+                    )
+                    ai_post_files.update(
+                        {
+                            f"ai_post_retry_{key}": str(value)
+                            for key, value in pipeline.write_submission_batch(
+                                retry_batch,
+                                output_dir / "video_post_enhance_retry" / "submission",
+                            ).items()
+                        }
+                    )
+                    ai_downloads = pipeline.download_submission_artifacts(
+                        retry_batch,
+                        output_dir / "video_post_enhance_retry" / "artifacts",
+                        config_path=args.config_path,
+                        timeout_seconds=max(args.timeout_seconds, 900.0),
+                        poll_interval_seconds=args.poll_interval_seconds,
+                    )
+                    ai_post_files.update(
+                        {
+                            f"ai_post_retry_{key}": str(value)
+                            for key, value in pipeline.write_artifact_download_batch(
+                                ai_downloads,
+                                output_dir / "video_post_enhance_retry" / "downloads",
+                            ).items()
+                        }
+                    )
                 ai_map = {
                     record.shot_id: record.output_path
                     for record in ai_downloads.records

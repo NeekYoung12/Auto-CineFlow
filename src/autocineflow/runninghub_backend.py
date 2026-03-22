@@ -294,10 +294,14 @@ def _prepare_video_post_enhance_overrides(
         raise ValueError("RunningHub video post-enhance payload missing source_video_path")
 
     uploaded = upload_runninghub_file(source_video, "video", config_path=config_path, timeout_seconds=timeout_seconds)
+    new_resolution = int(payload.get("new_resolution", 1536) or 1536)
+    seed = int(payload.get("seed", 9527) or 9527)
+    batch_size = int(payload.get("batch_size", 41) or 41)
     overrides = [
-        {"nodeId": "video_input", "fieldName": "video", "fieldValue": uploaded},
-        {"nodeId": "load_video", "fieldName": "video", "fieldValue": uploaded},
-        {"nodeId": "1", "fieldName": "video", "fieldValue": uploaded},
+        {"nodeId": "968", "fieldName": "video", "fieldValue": uploaded},
+        {"nodeId": "966", "fieldName": "seed", "fieldValue": seed},
+        {"nodeId": "966", "fieldName": "new_resolution", "fieldValue": new_resolution},
+        {"nodeId": "966", "fieldName": "batch_size", "fieldValue": batch_size},
     ]
     return overrides
 

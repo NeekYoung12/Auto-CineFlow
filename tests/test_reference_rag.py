@@ -201,3 +201,36 @@ def test_consistency_filters_private_use_mojibake_phrases():
         assert "涓昏" not in package.shots[0].identity_prompt_suffix
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_scene_retrieval_prefers_external_reference_library_over_generated_out():
+    temp_dir = _workspace_temp_dir()
+    try:
+        external_root = _build_reference_root(temp_dir / "external")
+        generated_root = temp_dir / "Auto-CineFlow" / "out"
+        generated_scene_dir = generated_root / "scene_bad"
+        generated_scene_dir.mkdir(parents=True, exist_ok=True)
+        _write_image(generated_scene_dir / "frame.png", (60, 60, 60))
+        (generated_scene_dir / "storyboard_package.json").write_text(
+            json.dumps(
+                {
+                    "project_name": "Generated",
+                    "scene_id": "BAD_SCENE",
+                    "scene_location": "neon alley",
+                    "shots": [{"prompt": "neon alley with signage text everywhere"}],
+                    "scene_tags": ["neon", "night"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        library = build_reference_library([generated_root, external_root])
+        scenes = retrieve_scene_assets(library, "night neon alley rain", top_k=2)
+
+        assert len(scenes) == 2
+        assert "video-studio-system" not in scenes[0].source_root.lower() or scenes[0].scene_id == "SCENE_NEON"
+        assert scenes[0].scene_id == "SCENE_NEON"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

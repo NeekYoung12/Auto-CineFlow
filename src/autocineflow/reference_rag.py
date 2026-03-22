@@ -292,6 +292,11 @@ def retrieve_scene_assets(
             score += 0.04
         if asset.palette_signature:
             score += 0.02
+        root_lower = asset.source_root.lower()
+        if "video-studio-system" in root_lower:
+            score += 0.08
+        if "autocineflow" in root_lower and root_lower.endswith("out"):
+            score -= 0.08
         ranked.append(asset.model_copy(update={"score": round(score, 4)}))
 
     ranked.sort(key=lambda item: (-item.score, item.scene_id, item.asset_id))
