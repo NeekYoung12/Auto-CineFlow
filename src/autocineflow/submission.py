@@ -33,6 +33,7 @@ class SubmissionProvider(str, Enum):
     AUTOMATIC1111 = "automatic1111"
     COMFYUI = "comfyui"
     MINIMAX_IMAGE = "minimax_image"
+    MINIMAX_VIDEO = "minimax_video"
 
 
 class SubmissionTarget(BaseModel):
@@ -110,6 +111,23 @@ def build_submission_jobs_from_package(
             for job in package.render_queue
         ]
 
+    if provider == SubmissionProvider.MINIMAX_VIDEO:
+        return [
+            SubmissionJob(
+                job_id=job.job_id,
+                shot_id=job.shot_id,
+                scene_id=job.metadata.get("scene_id", package.scene_id),
+                provider=provider,
+                payload={
+                    "model": "MiniMax-Hailuo-02",
+                    "prompt": job.prompt,
+                    "duration": 6,
+                    "resolution": "768P",
+                },
+            )
+            for job in package.render_queue
+        ]
+
     if provider == SubmissionProvider.AUTOMATIC1111:
         bundle = automatic1111_bundle(package)
         return [
@@ -169,6 +187,13 @@ def build_submission_jobs_from_execution_plan(
                 "n": 1,
                 "prompt_optimizer": False,
                 "aigc_watermark": False,
+            }
+        elif provider == SubmissionProvider.MINIMAX_VIDEO:
+            payload = {
+                "model": "MiniMax-Hailuo-02",
+                "prompt": item.get("prompt", ""),
+                "duration": 6,
+                "resolution": "768P",
             }
         else:
             payload = dict(item)
@@ -249,14 +274,15 @@ def _submit_to_webhook(job: SubmissionJob, target: SubmissionTarget) -> Submissi
 
 
 def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
-    """Submit an image generation request to the MiniMax media API."""
+    """Submit a media generation request to the MiniMax API."""
 
     api_key, base_url = resolve_minimax_media_settings(target.config_path or None)
     if not api_key:
         raise ValueError("MiniMax media API key not found in config.")
 
+    endpoint = "/image_generation" if job.provider == SubmissionProvider.MINIMAX_IMAGE else "/video_generation"
     response = httpx.post(
-        f"{base_url}/image_generation",
+        f"{base_url}{endpoint}",
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -266,13 +292,18 @@ def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> Subm
     )
     response.raise_for_status()
     payload = response.json()
-    image_url = ""
+    media_message = ""
+    backend_job_id = ""
     if isinstance(payload, dict):
-        data = payload.get("data", {})
-        if isinstance(data, dict):
-            image_urls = data.get("image_urls", [])
-            if image_urls:
-                image_url = str(image_urls[0])
+        if job.provider == SubmissionProvider.MINIMAX_IMAGE:
+            data = payload.get("data", {})
+            if isinstance(data, dict):
+                image_urls = data.get("image_urls", [])
+                if image_urls:
+                    media_message = str(image_urls[0])
+        else:
+            backend_job_id = str(payload.get("task_id", ""))
+            media_message = backend_job_id
 
     return SubmissionRecord(
         job_id=job.job_id,
@@ -281,8 +312,8 @@ def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> Subm
         backend=target.backend,
         status="submitted",
         submitted_at=datetime.now(timezone.utc).isoformat(),
-        backend_job_id=str(payload.get("id", "")) if isinstance(payload, dict) else "",
-        message=image_url or response.text[:300],
+        backend_job_id=backend_job_id or (str(payload.get("id", "")) if isinstance(payload, dict) else ""),
+        message=media_message or response.text[:300],
     )
 
 

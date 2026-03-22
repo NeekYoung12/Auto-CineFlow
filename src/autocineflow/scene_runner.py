@@ -63,7 +63,11 @@ def main() -> int:
     downloads = None
     qa_files = {}
     if not args.skip_download:
-        downloads = pipeline.download_submission_artifacts(submission_batch, output_dir / "artifacts")
+        downloads = pipeline.download_submission_artifacts(
+            submission_batch,
+            output_dir / "artifacts",
+            config_path=args.config_path,
+        )
         pipeline.write_artifact_download_batch(downloads, output_dir / "downloads")
         updated_manifest = pipeline.update_render_manifest_from_downloads(delivery_files["render_manifest_template"], downloads)
         qa_report = pipeline.render_qa_report(package, updated_manifest)

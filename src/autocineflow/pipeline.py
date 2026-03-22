@@ -782,10 +782,19 @@ class CineFlowPipeline:
         self,
         batch: SubmissionBatch,
         output_dir: str | Path,
+        config_path: str | None = None,
+        timeout_seconds: float = 900.0,
+        poll_interval_seconds: float = 10.0,
     ) -> ArtifactDownloadBatch:
         """Download URL-based artifacts referenced by a submission batch."""
 
-        return download_submission_artifacts(batch, output_dir)
+        return download_submission_artifacts(
+            batch,
+            output_dir,
+            config_path=config_path,
+            timeout_seconds=timeout_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+        )
 
     def artifact_download_batch_json(self, batch: ArtifactDownloadBatch, indent: int = 2) -> str:
         """Serialise an artifact download batch."""

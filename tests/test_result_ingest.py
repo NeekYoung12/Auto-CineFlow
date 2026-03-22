@@ -94,3 +94,60 @@ def test_write_artifact_download_batch_creates_json(monkeypatch):
         assert payload["source_id"] == "INGEST_SCENE"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_download_minimax_video_artifact_via_task_polling(monkeypatch):
+    pipeline, package, batch = _build_submission_batch()
+    batch.records[0].provider = SubmissionProvider.MINIMAX_VIDEO
+    batch.records[0].backend_job_id = "task-123"
+    batch.records[0].message = ""
+
+    class DummyResponse:
+        def __init__(self, payload=None, content=None):
+            self._payload = payload or {}
+            self.content = content or b""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    calls = {"query": 0}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        if url == "https://api.example.invalid/v1/query/video_generation":
+            calls["query"] += 1
+            return DummyResponse({"status": "Success", "file_id": "file-123"})
+        if url == "https://api.example.invalid/v1/files/retrieve":
+            return DummyResponse({"file": {"download_url": "https://example.invalid/video.mp4"}})
+        if url == "https://example.invalid/video.mp4":
+            return DummyResponse(content=b"fake-video-bytes")
+        raise AssertionError(url)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Image or Video Generation:",
+                    "API_KEY=sk-media",
+                    "MINIMAX_BASE_URL=https://api.example.invalid/v1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        downloads = pipeline.download_submission_artifacts(
+            batch,
+            temp_dir / "artifacts",
+            config_path=str(config_path),
+            timeout_seconds=30.0,
+            poll_interval_seconds=0.01,
+        )
+        assert downloads.records[0].downloaded is True
+        assert downloads.records[0].output_path.endswith(".mp4")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

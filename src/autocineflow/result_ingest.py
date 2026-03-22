@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, Field
 
+from .config_loader import resolve_minimax_media_settings
 from .render_qa import RenderExpectation, load_render_manifest
-from .submission import SubmissionBatch
+from .submission import SubmissionBatch, SubmissionProvider
 
 
 class ArtifactDownloadRecord(BaseModel):
@@ -38,6 +40,57 @@ def _artifact_url_from_record(record) -> str:
     return message if message.startswith("http://") or message.startswith("https://") else ""
 
 
+def _minimax_video_download_url(
+    task_id: str,
+    config_path: str | None,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> str:
+    """Poll MiniMax video generation and return the final download URL."""
+
+    api_key, base_url = resolve_minimax_media_settings(config_path)
+    if not api_key:
+        raise ValueError("MiniMax media API key not found in config.")
+
+    deadline = time.monotonic() + timeout_seconds
+    task_payload = None
+    while time.monotonic() < deadline:
+        response = httpx.get(
+            f"{base_url}/query/video_generation",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"task_id": task_id},
+            timeout=60.0,
+        )
+        response.raise_for_status()
+        task_payload = response.json()
+        status = str(task_payload.get("status", ""))
+        if status == "Success":
+            break
+        if status in {"Fail", "Failed"}:
+            raise RuntimeError(f"MiniMax video task failed: {task_payload}")
+        time.sleep(poll_interval_seconds)
+    else:
+        raise TimeoutError(f"Timed out waiting for MiniMax video task {task_id}.")
+
+    file_id = str((task_payload or {}).get("file_id", ""))
+    if not file_id:
+        raise RuntimeError(f"MiniMax video task finished without file_id: {task_payload}")
+
+    response = httpx.get(
+        f"{base_url}/files/retrieve",
+        headers={"Authorization": f"Bearer {api_key}"},
+        params={"file_id": file_id},
+        timeout=60.0,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    file_payload = payload.get("file", {}) if isinstance(payload, dict) else {}
+    download_url = str(file_payload.get("download_url", ""))
+    if not download_url:
+        raise RuntimeError(f"MiniMax file retrieve returned no download_url: {payload}")
+    return download_url
+
+
 def _extension_from_url(url: str) -> str:
     """Infer a file extension from a URL."""
 
@@ -49,6 +102,9 @@ def _extension_from_url(url: str) -> str:
 def download_submission_artifacts(
     batch: SubmissionBatch,
     output_dir: str | Path,
+    config_path: str | None = None,
+    timeout_seconds: float = 900.0,
+    poll_interval_seconds: float = 10.0,
 ) -> ArtifactDownloadBatch:
     """Download any URL-based artifacts referenced by a submission batch."""
 
@@ -58,6 +114,26 @@ def download_submission_artifacts(
     records: list[ArtifactDownloadRecord] = []
     for record in batch.records:
         url = _artifact_url_from_record(record)
+        if not url and record.provider == SubmissionProvider.MINIMAX_VIDEO and record.backend_job_id:
+            try:
+                url = _minimax_video_download_url(
+                    record.backend_job_id,
+                    config_path=config_path,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                )
+            except Exception as exc:  # noqa: BLE001
+                records.append(
+                    ArtifactDownloadRecord(
+                        job_id=record.job_id,
+                        shot_id=record.shot_id,
+                        url="",
+                        output_path="",
+                        downloaded=False,
+                        error=str(exc),
+                    )
+                )
+                continue
         if not url:
             records.append(
                 ArtifactDownloadRecord(
@@ -160,10 +236,11 @@ def main() -> int:
     parser.add_argument("--artifacts-dir", required=True, help="Directory to store downloaded artifacts")
     parser.add_argument("--manifest-file", default="", help="Optional render manifest JSON to update")
     parser.add_argument("--output-dir", required=True, help="Directory for download batch outputs")
+    parser.add_argument("--config-path", default="", help="Config file for provider-specific artifact retrieval")
     args = parser.parse_args()
 
     batch = SubmissionBatch.model_validate_json(Path(args.batch_file).read_text(encoding="utf-8"))
-    downloads = download_submission_artifacts(batch, args.artifacts_dir)
+    downloads = download_submission_artifacts(batch, args.artifacts_dir, config_path=args.config_path or None)
     output_files = write_artifact_download_batch(downloads, args.output_dir)
 
     if args.manifest_file:

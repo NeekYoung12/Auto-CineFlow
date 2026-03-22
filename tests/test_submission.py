@@ -74,17 +74,22 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     a1111_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.AUTOMATIC1111)
     comfy_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.COMFYUI)
     minimax_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_IMAGE)
+    minimax_video_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_VIDEO)
 
     assert len(generic_jobs) == 5
     assert len(a1111_jobs) == 5
     assert len(comfy_jobs) == 5
     assert len(minimax_jobs) == 5
+    assert len(minimax_video_jobs) == 5
     assert a1111_jobs[0].payload["seed"] == package.shots[0].render_seed
     assert comfy_jobs[0].payload["workflow"]["seed"] == package.shots[0].render_seed
     assert minimax_jobs[0].payload["model"] == "image-01"
     assert minimax_jobs[0].payload["aspect_ratio"] == "16:9"
     assert minimax_jobs[0].payload["seed"] == package.shots[0].render_seed
     assert "metadata" not in minimax_jobs[0].payload
+    assert minimax_video_jobs[0].payload["model"] == "MiniMax-Hailuo-02"
+    assert minimax_video_jobs[0].payload["duration"] == 6
+    assert minimax_video_jobs[0].payload["resolution"] == "768P"
 
 
 def test_submit_jobs_to_filesystem_queue():
@@ -172,6 +177,56 @@ def test_submit_jobs_to_minimax_api_backend(monkeypatch):
         )
         assert batch.records[0].status == "submitted"
         assert batch.records[0].backend_job_id == "minimax-job-1"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_submit_video_jobs_to_minimax_api_backend(monkeypatch):
+    pipeline, package = _build_package()
+    jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_VIDEO)
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"task_id": "minimax-video-task-1"}
+
+        @property
+        def text(self):
+            return '{"ok":true}'
+
+    def fake_post(url, headers, json, timeout):
+        assert url == "https://api.example.invalid/v1/video_generation"
+        assert json["model"] == "MiniMax-Hailuo-02"
+        return DummyResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Image or Video Generation:",
+                    "API_KEY=sk-media",
+                    "MINIMAX_BASE_URL=https://api.example.invalid/v1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        batch = pipeline.submit_jobs(
+            jobs[:1],
+            SubmissionTarget(
+                backend=SubmissionBackend.MINIMAX_API,
+                config_path=str(config_path),
+            ),
+            source_type="package",
+            source_id=package.scene_id,
+        )
+        assert batch.records[0].status == "submitted"
+        assert batch.records[0].backend_job_id == "minimax-video-task-1"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

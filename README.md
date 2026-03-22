@@ -294,6 +294,17 @@ python -m uv run python -m autocineflow.submission ^
   --spool-dir ""
 ```
 
+MiniMax text-to-video is also supported:
+
+```bash
+python -m uv run python -m autocineflow.submission ^
+  --package-file out\scene_10\storyboard_package.json ^
+  --provider minimax_video ^
+  --backend minimax_api ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --output-dir out\submission_records
+```
+
 ## End-to-End Scene Runner
 
 To run one scene through generation, packaging, MiniMax submission, artifact download, and render QA:
@@ -308,6 +319,8 @@ python -m uv run python -m autocineflow.scene_runner ^
   --backend minimax_api ^
   --job-limit 1
 ```
+
+For MiniMax text-to-video, swap `--provider minimax_video`.
 
 ## Submission Monitoring
 
