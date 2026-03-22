@@ -122,6 +122,13 @@ from .asset_library import (
     latest_scene_versions,
     write_asset_library,
 )
+from .recovery_policy import (
+    RecoveryPlan,
+    build_recovery_plan,
+    recovery_plan_json,
+    recovery_plan_markdown,
+    write_recovery_plan,
+)
 from .result_ingest import (
     ArtifactDownloadBatch,
     artifact_download_batch_json,
@@ -563,7 +570,7 @@ class CineFlowPipeline:
             encoding="utf-8",
         )
         assembly_files = self.write_sequence_assembly_plan(
-            self.build_sequence_assembly_plan(package),
+            self.build_sequence_assembly_plan(package, artifacts_dir=str(Path(output_dir) / "artifacts")),
             Path(output_dir) / "assembly",
         )
         return {
@@ -913,6 +920,7 @@ class CineFlowPipeline:
     ) -> SequenceAssemblyResult:
         """Assemble a sequence with FFmpeg."""
 
+        self.write_sequence_assembly_plan(plan, assembly_dir)
         return assemble_sequence_with_ffmpeg(
             plan,
             assembly_dir=assembly_dir,
@@ -998,3 +1006,27 @@ class CineFlowPipeline:
         """Write asset library outputs to disk."""
 
         return write_asset_library(library, output_dir)
+
+    def build_recovery_plan(self, batch: SubmissionBatch) -> RecoveryPlan:
+        """Build a strategy-based recovery plan from a submission batch."""
+
+        return build_recovery_plan(batch)
+
+    def recovery_plan_json(self, plan: RecoveryPlan, indent: int = 2) -> str:
+        """Serialise a recovery plan."""
+
+        return recovery_plan_json(plan, indent=indent)
+
+    def recovery_plan_markdown(self, plan: RecoveryPlan) -> str:
+        """Export a human-readable recovery plan."""
+
+        return recovery_plan_markdown(plan)
+
+    def write_recovery_plan(
+        self,
+        plan: RecoveryPlan,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write recovery plan outputs to disk."""
+
+        return write_recovery_plan(plan, output_dir)

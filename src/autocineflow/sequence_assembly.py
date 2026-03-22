@@ -97,7 +97,8 @@ def ffmpeg_concat_manifest(plan: SequenceAssemblyPlan) -> str:
 
     lines = ["ffconcat version 1.0"]
     for clip in plan.clips:
-        lines.append(f"file '{clip.expected_asset_path.replace('\\', '/')}'")
+        absolute_path = str(Path(clip.expected_asset_path).resolve()).replace("\\", "/")
+        lines.append(f"file '{absolute_path}'")
         if clip.editorial_duration_seconds > 0:
             lines.append(f"outpoint {clip.editorial_duration_seconds:.2f}")
     return "\n".join(lines) + "\n"

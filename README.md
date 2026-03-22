@@ -347,6 +347,14 @@ python -m uv run python -m autocineflow.scene_resume ^
   --config-path D:\Codex\workspace\config\conf
 ```
 
+To rerender only the failed clips from `sequence_repair_plan.json`:
+
+```bash
+python -m uv run python -m autocineflow.scene_repair ^
+  --run-dir out\scene_40s_full_v2 ^
+  --config-path D:\Codex\workspace\config\conf
+```
+
 ## Submission Monitoring
 
 For filesystem-backed queues you can monitor batch progress:
@@ -362,3 +370,18 @@ This writes:
 
 - `submission_monitor_report.json`
 - `submission_monitor_report.md`
+
+## Recovery Planning
+
+To turn provider failures into actions such as pause, retry, or manual fix:
+
+```bash
+python -m uv run python -m autocineflow.recovery_policy ^
+  --batch-file out\scene_40s_full_v2\repair_submission\submission_batch.json ^
+  --output-dir out\scene_40s_full_v2\recovery
+```
+
+This writes:
+
+- `recovery_plan.json`
+- `recovery_plan.md`
