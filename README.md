@@ -14,7 +14,7 @@ Auto-CineFlow is an LLM-driven cinematic storyboard generator for 1-2 character 
 - Local reference retrieval over existing character sheets, storyboard outputs, and film clips
 - Character consistency packaging with reference portraits, multiview prompts, and FaceID-compatible descriptors
 - Delivery packaging to manifest JSON, shot list CSV, render queue JSON, and editorial EDL
-- Provider bundles for Automatic1111, ComfyUI, RunningHub FaceID workflows, and Volcengine Seedream-style reference jobs
+- Provider bundles for Automatic1111, ComfyUI, RunningHub FaceID workflows, and Volcengine Seedream reference jobs
 - Acceptance and production-readiness reports
 
 ## Architecture
@@ -361,6 +361,17 @@ python -m uv run python -m autocineflow.submission ^
   --output-dir out\submission_records
 ```
 
+Volcengine Seedream image generation is also supported:
+
+```bash
+python -m uv run python -m autocineflow.submission ^
+  --package-file out\scene_10\storyboard_package.json ^
+  --provider volcengine_seedream ^
+  --backend volcengine_ark ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --output-dir out\submission_records
+```
+
 ## End-to-End Scene Runner
 
 To run one scene through generation, packaging, MiniMax submission, artifact download, and render QA:
@@ -379,6 +390,7 @@ python -m uv run python -m autocineflow.scene_runner ^
 ```
 
 For MiniMax text-to-video, swap `--provider minimax_video`.
+For Volcengine image generation, use `--provider volcengine_seedream --backend volcengine_ark`.
 
 For offline consistency-package generation only, use a dry-run backend such as `automatic1111 + dry_run` or `comfyui + dry_run`. The run will still emit:
 
@@ -432,3 +444,18 @@ This writes:
 
 - `recovery_plan.json`
 - `recovery_plan.md`
+
+## Provider Probe
+
+To verify provider readiness from the local config:
+
+```bash
+python -m uv run python -m autocineflow.provider_probe ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --output-dir out\provider_probe
+```
+
+This currently checks:
+
+- Volcengine ARK config presence and normalized endpoint
+- RunningHub account status through the official account-status API

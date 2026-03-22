@@ -139,30 +139,34 @@ def runninghub_faceid_bundle(package: StoryboardPackage) -> list[dict[str, Any]]
 
 
 def volcengine_seedream_bundle(package: StoryboardPackage) -> list[dict[str, Any]]:
-    """Build Seedream-style reference bundles for later Volcengine integration."""
+    """Build Seedream-ready reference bundles for Volcengine ARK/LAS image generation."""
 
     jobs: list[dict[str, Any]] = []
     for render_job in package.render_queue:
         character_refs = list(render_job.metadata.get("character_reference_images", []))
         scene_refs = list(render_job.metadata.get("scene_reference_images", []))
         all_refs = character_refs + scene_refs
+        remote_refs = _remote_urls(all_refs)[:10]
+        request = {
+            "model": "doubao-seedream-4-0-250828",
+            "prompt": render_job.prompt,
+            "negative_prompt": render_job.negative_prompt,
+            "seed": render_job.render_seed,
+            "size": f"{render_job.width}x{render_job.height}",
+            "response_format": "url",
+            "watermark": True,
+        }
+        if remote_refs:
+            request["image"] = remote_refs
         jobs.append(
             {
                 "job_id": render_job.job_id,
                 "shot_id": render_job.shot_id,
                 "provider": "volcengine_seedream_reference",
-                "request": {
-                    "prompt": render_job.prompt,
-                    "negative_prompt": render_job.negative_prompt,
-                    "seed": render_job.render_seed,
-                    "reference_image_urls": _remote_urls(all_refs)[:10],
-                    "image_size": {
-                        "width": render_job.width,
-                        "height": render_job.height,
-                    },
-                },
+                "request": request,
                 "metadata": {
                     **dict(render_job.metadata),
+                    "reference_image_urls": remote_refs,
                     "local_reference_images": _local_paths(all_refs),
                 },
             }

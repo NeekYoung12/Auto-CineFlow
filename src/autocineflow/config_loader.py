@@ -145,3 +145,54 @@ def resolve_minimax_media_settings(
     )
     base_url = section.get("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
     return api_key, base_url.rstrip("/")
+
+
+def resolve_runninghub_settings(
+    config_path: str | Path | None = None,
+) -> tuple[str, str]:
+    """Resolve RunningHub credentials from env vars or the sectioned config file."""
+
+    resolved_config = Path(config_path) if config_path else discover_default_config_path()
+    sections = parse_sectioned_config(resolved_config) if resolved_config else {}
+    section = sections.get("RunningHUB", {})
+
+    api_key = (
+        os.environ.get("RUNNINGHUB_API_KEY")
+        or section.get("API_KEY")
+        or section.get("RUNNINGHUB_API_KEY")
+        or ""
+    )
+    base_url = (
+        os.environ.get("RUNNINGHUB_BASE_URL")
+        or section.get("RUNNINGHUB_BASE_URL")
+        or "https://www.runninghub.cn"
+    )
+    return api_key, base_url.rstrip("/")
+
+
+def resolve_volcengine_ark_settings(
+    config_path: str | Path | None = None,
+) -> tuple[str, str]:
+    """Resolve Volcengine ARK/LAS credentials from env vars or the sectioned config file."""
+
+    resolved_config = Path(config_path) if config_path else discover_default_config_path()
+    sections = parse_sectioned_config(resolved_config) if resolved_config else {}
+    section = sections.get("volcengine", {})
+
+    api_key = (
+        os.environ.get("ARK_API_KEY")
+        or os.environ.get("VOLCENGINE_ARK_API_KEY")
+        or os.environ.get("LAS_API_KEY")
+        or section.get("ARK_API_KEY")
+        or section.get("VOLCENGINE_ARK_API_KEY")
+        or section.get("LAS_API_KEY")
+        or ""
+    )
+    base_url = (
+        os.environ.get("VOLCENGINE_ARK_BASE_URL")
+        or os.environ.get("LAS_BASE_URL")
+        or section.get("VOLCENGINE_ARK_BASE_URL")
+        or section.get("LAS_BASE_URL")
+        or "https://ark.cn-beijing.volces.com/api/v3"
+    )
+    return api_key, base_url.rstrip("/")

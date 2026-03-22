@@ -11,6 +11,8 @@ from autocineflow.config_loader import (
     parse_sectioned_config,
     resolve_minimax_media_settings,
     resolve_openai_settings,
+    resolve_runninghub_settings,
+    resolve_volcengine_ark_settings,
 )
 
 
@@ -134,6 +136,29 @@ def test_parse_sectioned_config_supports_bare_section_headers():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_parse_sectioned_config_supports_colon_section_headers():
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Kimi-Code:",
+                    "API_KEY=sk-kimi",
+                    "RunningHUB:",
+                    "API_KEY=rh-key",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        sections = parse_sectioned_config(config_path)
+        assert sections["Kimi-Code"]["API_KEY"] == "sk-kimi"
+        assert sections["RunningHUB"]["API_KEY"] == "rh-key"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def test_resolve_minimax_media_settings_reads_media_section():
     temp_dir = _workspace_temp_dir()
     try:
@@ -152,5 +177,34 @@ def test_resolve_minimax_media_settings_reads_media_section():
         api_key, base_url = resolve_minimax_media_settings(config_path)
         assert api_key == "sk-media"
         assert base_url == "https://api.example.invalid/v1"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_resolve_runninghub_and_volcengine_settings_read_sections():
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "RunningHUB:",
+                    "API_KEY=rh-key",
+                    "RUNNINGHUB_BASE_URL=https://rh.example.invalid",
+                    "volcengine:",
+                    "ARK_API_KEY=ark-key",
+                    "VOLCENGINE_ARK_BASE_URL=https://las.example.invalid",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        runninghub_api_key, runninghub_base_url = resolve_runninghub_settings(config_path)
+        volcengine_api_key, volcengine_base_url = resolve_volcengine_ark_settings(config_path)
+
+        assert runninghub_api_key == "rh-key"
+        assert runninghub_base_url == "https://rh.example.invalid"
+        assert volcengine_api_key == "ark-key"
+        assert volcengine_base_url == "https://las.example.invalid"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

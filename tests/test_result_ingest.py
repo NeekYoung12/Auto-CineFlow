@@ -171,3 +171,29 @@ def test_download_minimax_video_artifact_via_task_polling(monkeypatch):
         assert downloads.records[0].output_path.endswith(".mp4")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_download_submission_artifacts_from_volcengine_url(monkeypatch):
+    pipeline, package, batch = _build_submission_batch()
+    batch.records[0].provider = SubmissionProvider.VOLCENGINE_SEEDREAM
+    batch.records[0].message = "https://example.invalid/seedream.png"
+
+    class DummyResponse:
+        content = b"seedream-bytes"
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, timeout):
+        assert url == "https://example.invalid/seedream.png"
+        return DummyResponse()
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    temp_dir = _workspace_temp_dir()
+    try:
+        downloads = pipeline.download_submission_artifacts(batch, temp_dir / "artifacts")
+        assert downloads.records[0].downloaded is True
+        assert downloads.records[0].output_path.endswith(".png")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

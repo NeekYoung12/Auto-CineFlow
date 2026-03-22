@@ -75,12 +75,16 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     comfy_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.COMFYUI)
     minimax_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_IMAGE)
     minimax_video_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_VIDEO)
+    runninghub_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.RUNNINGHUB_FACEID)
+    volcengine_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.VOLCENGINE_SEEDREAM)
 
     assert len(generic_jobs) == 5
     assert len(a1111_jobs) == 5
     assert len(comfy_jobs) == 5
     assert len(minimax_jobs) == 5
     assert len(minimax_video_jobs) == 5
+    assert len(runninghub_jobs) == 5
+    assert len(volcengine_jobs) == 5
     assert a1111_jobs[0].payload["seed"] == package.shots[0].render_seed
     assert comfy_jobs[0].payload["workflow"]["seed"] == package.shots[0].render_seed
     assert minimax_jobs[0].payload["model"] == "image-01"
@@ -91,6 +95,9 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     assert minimax_video_jobs[0].payload["duration"] == 10
     assert minimax_video_jobs[0].payload["resolution"] == "768P"
     assert len(minimax_video_jobs[0].payload["prompt"]) <= len(package.video_segments[0].prompt)
+    assert runninghub_jobs[0].payload["workflow_family"] == "runninghub_comfyui_faceid"
+    assert volcengine_jobs[0].payload["model"] == "doubao-seedream-4-0-250828"
+    assert volcengine_jobs[0].payload["response_format"] == "url"
 
 
 def test_submit_jobs_to_filesystem_queue():
@@ -256,6 +263,62 @@ def test_submit_video_jobs_to_minimax_api_backend(monkeypatch):
         assert batch.records[0].status == "submitted"
         assert batch.records[0].backend_job_id == "minimax-video-task-1"
         assert batch.records[0].provider_status_message == "ok"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_submit_seedream_jobs_to_volcengine_ark_backend(monkeypatch):
+    pipeline, package = _build_package()
+    jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.VOLCENGINE_SEEDREAM)
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "created": 1764041608,
+                "data": [{"url": "https://example.invalid/seedream.png"}],
+            }
+
+        @property
+        def text(self):
+            return '{"ok":true}'
+
+    def fake_post(url, headers, json, timeout):
+        assert url == "https://las.example.invalid/api/v3/images/generations"
+        assert headers["Authorization"] == "Bearer ark-key"
+        assert json["model"] == "doubao-seedream-4-0-250828"
+        assert json["response_format"] == "url"
+        return DummyResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "volcengine:",
+                    "ARK_API_KEY=ark-key",
+                    "VOLCENGINE_ARK_BASE_URL=https://las.example.invalid",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        batch = pipeline.submit_jobs(
+            jobs[:1],
+            SubmissionTarget(
+                backend=SubmissionBackend.VOLCENGINE_ARK,
+                config_path=str(config_path),
+            ),
+            source_type="package",
+            source_id=package.scene_id,
+        )
+        assert batch.records[0].status == "submitted"
+        assert batch.records[0].message == "https://example.invalid/seedream.png"
+        assert batch.records[0].backend_job_id == "1764041608"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

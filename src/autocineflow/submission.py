@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -11,10 +12,15 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
-from .config_loader import resolve_minimax_media_settings
+from .config_loader import resolve_minimax_media_settings, resolve_volcengine_ark_settings
 from .delivery import StoryboardPackage
 from .execution_planner import ProjectExecutionPlan
-from .provider_payloads import automatic1111_bundle, comfyui_bundle
+from .provider_payloads import (
+    automatic1111_bundle,
+    comfyui_bundle,
+    runninghub_faceid_bundle,
+    volcengine_seedream_bundle,
+)
 
 
 class SubmissionBackend(str, Enum):
@@ -24,6 +30,7 @@ class SubmissionBackend(str, Enum):
     WEBHOOK = "webhook"
     DRY_RUN = "dry_run"
     MINIMAX_API = "minimax_api"
+    VOLCENGINE_ARK = "volcengine_ark"
 
 
 class SubmissionProvider(str, Enum):
@@ -34,6 +41,8 @@ class SubmissionProvider(str, Enum):
     COMFYUI = "comfyui"
     MINIMAX_IMAGE = "minimax_image"
     MINIMAX_VIDEO = "minimax_video"
+    RUNNINGHUB_FACEID = "runninghub_faceid"
+    VOLCENGINE_SEEDREAM = "volcengine_seedream"
 
 
 class SubmissionTarget(BaseModel):
@@ -170,6 +179,32 @@ def build_submission_jobs_from_package(
             for segment in package.video_segments
         ]
 
+    if provider == SubmissionProvider.RUNNINGHUB_FACEID:
+        bundle = runninghub_faceid_bundle(package)
+        return [
+            SubmissionJob(
+                job_id=item["job_id"],
+                shot_id=item["shot_id"],
+                scene_id=item["metadata"].get("scene_id", package.scene_id),
+                provider=provider,
+                payload=item,
+            )
+            for item in bundle
+        ]
+
+    if provider == SubmissionProvider.VOLCENGINE_SEEDREAM:
+        bundle = volcengine_seedream_bundle(package)
+        return [
+            SubmissionJob(
+                job_id=item["job_id"],
+                shot_id=item["shot_id"],
+                scene_id=item["metadata"].get("scene_id", package.scene_id),
+                provider=provider,
+                payload=item["request"],
+            )
+            for item in bundle
+        ]
+
     if provider == SubmissionProvider.AUTOMATIC1111:
         bundle = automatic1111_bundle(package)
         return [
@@ -236,6 +271,14 @@ def build_submission_jobs_from_execution_plan(
                 "prompt": _condense_minimax_video_prompt(item.get("prompt", "")),
                 "duration": 6,
                 "resolution": "768P",
+            }
+        elif provider == SubmissionProvider.VOLCENGINE_SEEDREAM:
+            payload = {
+                "model": "doubao-seedream-4-0-250828",
+                "prompt": item.get("prompt", ""),
+                "size": f"{int(item.get('width', 1536))}x{int(item.get('height', 864))}",
+                "response_format": "url",
+                "watermark": True,
             }
         else:
             payload = dict(item)
@@ -414,6 +457,72 @@ def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> Subm
     )
 
 
+def _submit_to_volcengine_ark(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
+    """Submit an image generation request to the Volcengine ARK/LAS API."""
+
+    api_key, base_url = resolve_volcengine_ark_settings(target.config_path or None)
+    if not api_key:
+        raise ValueError("Volcengine ARK API key not found in config.")
+
+    payload = dict(job.payload)
+    endpoint = _volcengine_image_endpoint(base_url)
+    response = httpx.post(
+        endpoint,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=target.timeout_seconds,
+    )
+    response.raise_for_status()
+    body = response.json()
+    if isinstance(body, dict) and body.get("error"):
+        raise RuntimeError(f"Volcengine image generation error: {body['error']}")
+
+    backend_job_id = str(body.get("created", "")) if isinstance(body, dict) else ""
+    artifact_url = ""
+    if isinstance(body, dict):
+        data = body.get("data", []) or []
+        if data and isinstance(data[0], dict):
+            artifact_url = str(data[0].get("url", "") or "")
+            if not artifact_url and data[0].get("b64_json"):
+                backend_job_id = backend_job_id or f"b64-{job.job_id}"
+                artifact_url = _decode_base64_artifact(data[0]["b64_json"], job.job_id, target)
+
+    return SubmissionRecord(
+        job_id=job.job_id,
+        shot_id=job.shot_id,
+        provider=job.provider,
+        backend=target.backend,
+        status="submitted",
+        submitted_at=datetime.now(timezone.utc).isoformat(),
+        backend_job_id=backend_job_id,
+        message=artifact_url or response.text[:300],
+    )
+
+
+def _volcengine_image_endpoint(base_url: str) -> str:
+    """Resolve ARK vs LAS image-generation endpoint from a configured base URL."""
+
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/api/v3") or normalized.endswith("/api/v1"):
+        return f"{normalized}/images/generations"
+    if "operator.las." in normalized:
+        return f"{normalized}/api/v1/images/generations"
+    return f"{normalized}/api/v3/images/generations"
+
+
+def _decode_base64_artifact(encoded_payload: str, job_id: str, target: SubmissionTarget) -> str:
+    """Persist a base64 image returned by a provider and return the local path."""
+
+    output_root = Path(target.spool_dir or ".pytest_tmp" or ".")
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_path = output_root / f"{job_id}.png"
+    output_path.write_bytes(base64.b64decode(encoded_payload))
+    return str(output_path.resolve())
+
+
 def _submit_dry_run(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
     """Return a synthetic submission record without side effects."""
 
@@ -442,6 +551,8 @@ def submit_jobs(
             record = _submit_to_filesystem(job, target)
         elif target.backend == SubmissionBackend.MINIMAX_API:
             record = _submit_to_minimax_api(job, target)
+        elif target.backend == SubmissionBackend.VOLCENGINE_ARK:
+            record = _submit_to_volcengine_ark(job, target)
         elif target.backend == SubmissionBackend.WEBHOOK:
             record = _submit_to_webhook(job, target)
         else:
