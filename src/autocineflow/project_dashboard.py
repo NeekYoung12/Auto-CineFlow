@@ -64,12 +64,13 @@ def build_project_dashboard(
 
     render_rows = {row.scene_id: row for row in (render_qa.scene_results if render_qa else [])}
     execution_rows = {row.scene_id: row for row in (execution_plan.scene_summaries if execution_plan else [])}
-    keyframe_rows: dict[str, tuple[Optional[float], Optional[bool], Optional[float], Optional[bool], str]] = {}
+    keyframe_rows: dict[str, tuple[Optional[float], Optional[bool], str, Optional[float], Optional[bool], str]] = {}
     if asset_library is not None:
         for scene in latest_scene_versions(asset_library):
             keyframe_rows[scene.scene_id] = (
                 scene.keyframe_qa_score,
                 scene.keyframe_gate_passed,
+                scene.keyframe_gate_blocking_reason,
                 scene.local_visual_review_score,
                 scene.local_visual_review_passed,
                 scene.local_visual_review_status,
@@ -79,7 +80,16 @@ def build_project_dashboard(
         for scene_summary in project.scene_summaries:
             scene_dir = scenes_path / slugify(scene_summary.scene_id, default=scene_summary.scene_id.lower())
             report_path = scene_dir / "keyframe_qc" / "keyframe_qa_report.json"
+            gate_path = scene_dir / "keyframe_qc" / "keyframe_gate_report.json"
             local_visual_path = scene_dir / "keyframe_qc" / "local_vlm" / "local_visual_review_report.json"
+            keyframe_score = None
+            keyframe_passes = None
+            keyframe_blocking_reason = ""
+            if gate_path.exists():
+                gate_payload = json.loads(gate_path.read_text(encoding="utf-8"))
+                keyframe_score = float(gate_payload.get("score", 0.0)) if "score" in gate_payload else None
+                keyframe_passes = bool(gate_payload.get("passes_gate")) if "passes_gate" in gate_payload else None
+                keyframe_blocking_reason = str(gate_payload.get("blocking_reason", "") or "")
             local_visual_score = None
             local_visual_passes = None
             local_visual_status = ""
@@ -104,23 +114,26 @@ def build_project_dashboard(
                         result.get("recommendation") in {"repair", "rerender"} or (result.get("issues") or [])
                         for result in reviewed_results
                     )
-            if report_path.exists():
+            if report_path.exists() and keyframe_score is None:
                 payload = json.loads(report_path.read_text(encoding="utf-8"))
-                keyframe_rows[scene_summary.scene_id] = (
-                    float(payload.get("score", 0.0)) if "score" in payload else None,
-                    bool(payload.get("passes_gate")) if "passes_gate" in payload else None,
-                    local_visual_score,
-                    local_visual_passes,
-                    local_visual_status,
-                )
+                keyframe_score = float(payload.get("score", 0.0)) if "score" in payload else None
+                keyframe_passes = bool(payload.get("passes_gate")) if "passes_gate" in payload else None
+            keyframe_rows[scene_summary.scene_id] = (
+                keyframe_score,
+                keyframe_passes,
+                keyframe_blocking_reason,
+                local_visual_score,
+                local_visual_passes,
+                local_visual_status,
+            )
 
     scene_rows: list[ProjectDashboardScene] = []
     for scene_summary in project.scene_summaries:
         render_row = render_rows.get(scene_summary.scene_id)
         execution_row = execution_rows.get(scene_summary.scene_id)
-        keyframe_score, keyframe_passes, local_visual_score, local_visual_passes, local_visual_status = keyframe_rows.get(
+        keyframe_score, keyframe_passes, keyframe_blocking_reason, local_visual_score, local_visual_passes, local_visual_status = keyframe_rows.get(
             scene_summary.scene_id,
-            (None, None, None, None, ""),
+            (None, None, "", None, None, ""),
         )
 
         storyboard_passes = scene_summary.passes_gate
@@ -131,7 +144,7 @@ def build_project_dashboard(
         if not storyboard_passes:
             overall_status = "storyboard_blocked"
         elif keyframe_passes is False:
-            overall_status = "keyframe_blocked"
+            overall_status = f"keyframe_blocked:{keyframe_blocking_reason or 'qa'}"
         elif local_visual_passes is False:
             overall_status = "visual_review_blocked"
         elif render_passes is False:

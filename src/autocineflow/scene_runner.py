@@ -249,6 +249,7 @@ def main() -> int:
     selected_jobs = jobs if args.job_limit <= 0 else jobs[: args.job_limit]
     bootstrap_files = {}
     keyframe_qa_files = {}
+    keyframe_gate_files = {}
     local_visual_review_files = {}
     keyframe_gate_blocked = False
     provider = SubmissionProvider(args.provider)
@@ -440,9 +441,24 @@ def main() -> int:
                         ).items()
                     }
                 )
-                if _should_block_video_from_visual_review(provider, local_review_report) and not args.allow_keyframe_qa_fail:
-                    keyframe_gate_blocked = True
-            if _should_block_video_from_keyframes(provider, final_keyframe_report) and not args.allow_keyframe_qa_fail:
+            else:
+                local_review_report = None
+
+            gate_report = pipeline.build_keyframe_gate_report(
+                final_keyframe_report,
+                local_visual_report=local_review_report,
+            )
+            keyframe_gate_files.update(
+                {
+                    f"selected_{key}": str(value)
+                    for key, value in pipeline.write_keyframe_gate_report(
+                        gate_report,
+                        output_dir / "keyframe_qc",
+                    ).items()
+                }
+            )
+
+            if not gate_report.passes_gate and not args.allow_keyframe_qa_fail:
                 keyframe_gate_blocked = True
                 selected_jobs = []
             else:
@@ -639,6 +655,7 @@ def main() -> int:
                 "keyframe_gate_blocked": keyframe_gate_blocked,
                 "bootstrap_files": bootstrap_files,
                 "keyframe_qa_files": keyframe_qa_files,
+                "keyframe_gate_files": keyframe_gate_files,
                 "local_visual_review_files": local_visual_review_files,
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},

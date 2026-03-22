@@ -75,6 +75,20 @@ def test_project_dashboard_combines_storyboard_render_and_execution_data():
             ),
             encoding="utf-8",
         )
+        (scene_dir / "keyframe_qc" / "keyframe_gate_report.json").write_text(
+            json.dumps(
+                {
+                    "source_id": "SCENE_A",
+                    "score": 0.73,
+                    "passes_gate": False,
+                    "blocking_reason": "local_visual_review",
+                    "results": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         (scene_dir / "keyframe_qc" / "local_vlm").mkdir(parents=True, exist_ok=True)
         (scene_dir / "keyframe_qc" / "local_vlm" / "local_visual_review_report.json").write_text(
             json.dumps(
@@ -111,14 +125,14 @@ def test_project_dashboard_combines_storyboard_render_and_execution_data():
 
         assert dashboard.scene_count == 1
         assert dashboard.storyboard_ready_count == 1
-        assert dashboard.keyframe_ready_count == 1
+        assert dashboard.keyframe_ready_count == 0
         assert dashboard.local_visual_ready_count == 1
         assert dashboard.render_ready_count == 1
         assert dashboard.total_reuse_count == 5
         assert dashboard.total_rerender_count == 0
-        assert dashboard.scene_rows[0].keyframe_passes is True
+        assert dashboard.scene_rows[0].keyframe_passes is False
         assert dashboard.scene_rows[0].local_visual_passes is True
-        assert dashboard.scene_rows[0].overall_status == "ready"
+        assert dashboard.scene_rows[0].overall_status == "keyframe_blocked:local_visual_review"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

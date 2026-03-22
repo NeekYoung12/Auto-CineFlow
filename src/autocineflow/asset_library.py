@@ -27,6 +27,7 @@ class SceneAssetVersion(BaseModel):
     quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
     keyframe_qa_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     keyframe_gate_passed: Optional[bool] = None
+    keyframe_gate_blocking_reason: str = ""
     local_visual_review_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     local_visual_review_passed: Optional[bool] = None
     local_visual_review_status: str = ""
@@ -107,6 +108,7 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
     render_qa_payload = _maybe_json(output_root / "qa" / "render_qa_report.json")
     sequence_qa_payload = _maybe_json(output_root / "sequence_qc" / "sequence_qa_report.json")
     keyframe_qa_payload = _maybe_json(output_root / "keyframe_qc" / "keyframe_qa_report.json")
+    keyframe_gate_payload = _maybe_json(output_root / "keyframe_qc" / "keyframe_gate_report.json")
     local_visual_payload = _maybe_json(output_root / "keyframe_qc" / "local_vlm" / "local_visual_review_report.json")
     submission_payload = _maybe_json(output_root / "submission" / "submission_batch.json")
     recovery_payload = _maybe_json(output_root / "recovery" / "recovery_plan.json")
@@ -168,14 +170,27 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
         shot_count=len(package.shots),
         quality_score=float(package.quality_report.get("score", 0.0)),
         keyframe_qa_score=(
-            float(keyframe_qa_payload.get("score"))
-            if keyframe_qa_payload and "score" in keyframe_qa_payload
-            else None
+            float(keyframe_gate_payload.get("score"))
+            if keyframe_gate_payload and "score" in keyframe_gate_payload
+            else (
+                float(keyframe_qa_payload.get("score"))
+                if keyframe_qa_payload and "score" in keyframe_qa_payload
+                else None
+            )
         ),
         keyframe_gate_passed=(
-            bool(keyframe_qa_payload.get("passes_gate"))
-            if keyframe_qa_payload and "passes_gate" in keyframe_qa_payload
-            else None
+            bool(keyframe_gate_payload.get("passes_gate"))
+            if keyframe_gate_payload and "passes_gate" in keyframe_gate_payload
+            else (
+                bool(keyframe_qa_payload.get("passes_gate"))
+                if keyframe_qa_payload and "passes_gate" in keyframe_qa_payload
+                else None
+            )
+        ),
+        keyframe_gate_blocking_reason=(
+            str(keyframe_gate_payload.get("blocking_reason", "") or "")
+            if keyframe_gate_payload
+            else ""
         ),
         local_visual_review_score=local_visual_review_score,
         local_visual_review_passed=local_visual_review_passed,
@@ -330,6 +345,7 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Quality: `{scene.quality_score:.3f}`",
                 f"- Keyframe QA: `{scene.keyframe_qa_score if scene.keyframe_qa_score is not None else 'n/a'}`",
                 f"- Keyframe Pass: `{scene.keyframe_gate_passed if scene.keyframe_gate_passed is not None else 'n/a'}`",
+                f"- Keyframe Block Reason: `{scene.keyframe_gate_blocking_reason or 'n/a'}`",
                 f"- Local Visual Review: `{scene.local_visual_review_score if scene.local_visual_review_score is not None else scene.local_visual_review_status or 'n/a'}`",
                 f"- Local Visual Pass: `{scene.local_visual_review_passed if scene.local_visual_review_passed is not None else 'n/a'}`",
                 f"- Render QA: `{scene.render_qa_score if scene.render_qa_score is not None else 'n/a'}`",

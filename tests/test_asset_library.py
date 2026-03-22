@@ -84,6 +84,20 @@ def test_asset_library_indexes_scene_and_project_versions():
             ),
             encoding="utf-8",
         )
+        (temp_dir / "scene_run" / "keyframe_qc" / "keyframe_gate_report.json").write_text(
+            json.dumps(
+                {
+                    "source_id": "LIB_SCENE",
+                    "score": 0.79,
+                    "passes_gate": False,
+                    "blocking_reason": "local_visual_review",
+                    "results": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         (temp_dir / "scene_run" / "keyframe_qc" / "local_vlm").mkdir(parents=True, exist_ok=True)
         (temp_dir / "scene_run" / "keyframe_qc" / "local_vlm" / "local_visual_review_report.json").write_text(
             json.dumps(
@@ -133,8 +147,9 @@ def test_asset_library_indexes_scene_and_project_versions():
         latest_project = pipeline.latest_project_versions(library)[0]
         assert latest_scene.scene_id == "LIB_SCENE"
         assert latest_project.project_name == "Library Project"
-        assert any(scene.keyframe_qa_score == 0.82 for scene in library.scene_versions)
-        assert any(scene.keyframe_gate_passed is True for scene in library.scene_versions)
+        assert any(scene.keyframe_qa_score == 0.79 for scene in library.scene_versions)
+        assert any(scene.keyframe_gate_passed is False for scene in library.scene_versions)
+        assert any(scene.keyframe_gate_blocking_reason == "local_visual_review" for scene in library.scene_versions)
         assert any(scene.local_visual_review_score == 0.88 for scene in library.scene_versions)
         assert any(scene.local_visual_review_passed is True for scene in library.scene_versions)
         assert any(scene.failed_submission_count == 1 for scene in library.scene_versions)

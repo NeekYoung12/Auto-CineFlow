@@ -143,6 +143,11 @@ from .keyframe_qa import (
     select_best_keyframe_downloads,
     write_keyframe_qa_report,
 )
+from .keyframe_gate import (
+    KeyframeGateReport,
+    build_keyframe_gate_report,
+    write_keyframe_gate_report,
+)
 from .asset_library import (
     AssetLibrary,
     build_asset_library,
@@ -1291,6 +1296,24 @@ class CineFlowPipeline:
         """Write keyframe QA outputs to disk."""
 
         return write_keyframe_qa_report(report, output_dir)
+
+    def build_keyframe_gate_report(
+        self,
+        keyframe_report: KeyframeQAReport,
+        local_visual_report=None,
+    ) -> KeyframeGateReport:
+        """Combine keyframe QA and optional local visual review into one gate report."""
+
+        return build_keyframe_gate_report(keyframe_report, local_visual_report=local_visual_report)
+
+    def write_keyframe_gate_report(
+        self,
+        report: KeyframeGateReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write keyframe gate outputs to disk."""
+
+        return write_keyframe_gate_report(report, output_dir)
 
     def select_best_keyframe_downloads(self, *batches: ArtifactDownloadBatch) -> ArtifactDownloadBatch:
         """Select the best available keyframe per shot across multiple passes."""
