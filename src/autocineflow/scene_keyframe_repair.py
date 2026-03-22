@@ -10,7 +10,7 @@ from .delivery import StoryboardPackage
 from .pipeline import CineFlowPipeline
 from .scene_runner import (
     _build_rebuild_keyframe_jobs,
-    _should_block_video_from_visual_review,
+    _inject_bootstrap_keyframes,
 )
 from .submission import SubmissionBackend, SubmissionProvider, SubmissionTarget
 
@@ -40,6 +40,9 @@ def main() -> int:
     parser.add_argument("--poll-interval-seconds", type=float, default=10.0, help="Artifact polling interval")
     parser.add_argument("--enable-local-vlm-review", action="store_true", help="Run optional local visual review")
     parser.add_argument("--local-vlm-timeout-seconds", type=float, default=600.0, help="Timeout for local visual review subprocess")
+    parser.add_argument("--continue-video", action="store_true", help="If keyframes pass, continue directly into video generation")
+    parser.add_argument("--video-provider", default="runninghub_video_auto", choices=[item.value for item in SubmissionProvider])
+    parser.add_argument("--video-backend", default="runninghub_api", choices=[item.value for item in SubmissionBackend])
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -145,6 +148,50 @@ def main() -> int:
     )
     gate_files = pipeline.write_keyframe_gate_report(gate_report, run_dir / "keyframe_repair")
 
+    continued_video_files = {}
+    if args.continue_video and gate_report.passes_gate:
+        video_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider(args.video_provider))
+        target_shots = {record.shot_id for record in selected_downloads.records}
+        if target_shots:
+            video_jobs = [job for job in video_jobs if job.shot_id in target_shots]
+        video_jobs = _inject_bootstrap_keyframes(video_jobs, selected_downloads)
+        video_batch = pipeline.submit_jobs(
+            video_jobs,
+            SubmissionTarget(
+                backend=SubmissionBackend(args.video_backend),
+                config_path=args.config_path or "",
+                timeout_seconds=args.timeout_seconds,
+            ),
+            source_type="keyframe_repair_continue_video",
+            source_id=package.scene_id,
+        )
+        continued_video_files.update(
+            {
+                f"video_{key}": str(value)
+                for key, value in pipeline.write_submission_batch(
+                    video_batch,
+                    run_dir / "keyframe_repair" / "video_submission",
+                ).items()
+            }
+        )
+        video_downloads = pipeline.download_submission_artifacts(
+            video_batch,
+            run_dir / "artifacts",
+            config_path=args.config_path,
+            timeout_seconds=max(args.timeout_seconds, 900.0),
+            poll_interval_seconds=args.poll_interval_seconds,
+            skip_existing=False,
+        )
+        continued_video_files.update(
+            {
+                f"video_{key}": str(value)
+                for key, value in pipeline.write_artifact_download_batch(
+                    video_downloads,
+                    run_dir / "keyframe_repair" / "video_downloads",
+                ).items()
+            }
+        )
+
     print(
         json.dumps(
             {
@@ -158,6 +205,7 @@ def main() -> int:
                 "rebuild_files": rebuild_files,
                 "local_review_files": {key: str(value) for key, value in local_review_files.items()},
                 "gate_files": {key: str(value) for key, value in gate_files.items()},
+                "continued_video_files": continued_video_files,
             },
             ensure_ascii=False,
             indent=2,

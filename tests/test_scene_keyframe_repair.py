@@ -27,3 +27,19 @@ def test_select_keyframe_repair_jobs_filters_blocked_shots():
 
     assert len(selected) == 1
     assert selected[0].shot_id == jobs[0].shot_id
+
+
+def test_select_keyframe_repair_jobs_returns_all_when_gate_missing():
+    pipeline = CineFlowPipeline()
+    context = pipeline.run(
+        description="A man in black coat faces a woman in red dress across a tavern table.",
+        num_shots=3,
+        scene_id="KEYFRAME_REPAIR_SCENE_ALL",
+        use_llm=False,
+        emotion_override="tense",
+    )
+    package = pipeline.build_storyboard_package(context, project_name="Keyframe Repair")
+    jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.RUNNINGHUB_FACEID)
+
+    selected = select_keyframe_repair_jobs(jobs, None)
+    assert len(selected) == len(jobs)
