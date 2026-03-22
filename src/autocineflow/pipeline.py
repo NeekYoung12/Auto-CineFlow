@@ -578,6 +578,7 @@ class CineFlowPipeline:
         reference_library: ReferenceLibrary | None = None,
         character_top_k: int = 3,
         scene_top_k: int = 4,
+        allow_generated_scene_refs: bool = False,
     ) -> ConsistencyPackage:
         """Build a consistency package from local character and scene references."""
 
@@ -589,6 +590,7 @@ class CineFlowPipeline:
             reference_library=reference_library,
             character_top_k=character_top_k,
             scene_top_k=scene_top_k,
+            allow_generated_scene_refs=allow_generated_scene_refs,
         )
 
     def attach_consistency_package(

@@ -234,3 +234,48 @@ def test_scene_retrieval_prefers_external_reference_library_over_generated_out()
         assert scenes[0].scene_id == "SCENE_NEON"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_consistency_package_filters_generated_scene_refs_by_default():
+    temp_dir = _workspace_temp_dir()
+    try:
+        external_root = _build_reference_root(temp_dir / "external")
+        generated_root = temp_dir / "Auto-CineFlow" / "out"
+        generated_scene_dir = generated_root / "scene_bad"
+        generated_scene_dir.mkdir(parents=True, exist_ok=True)
+        _write_image(generated_scene_dir / "frame.png", (60, 60, 60))
+        (generated_scene_dir / "storyboard_package.json").write_text(
+            json.dumps(
+                {
+                    "project_name": "Generated",
+                    "scene_id": "BAD_SCENE",
+                    "scene_location": "neon alley",
+                    "shots": [{"prompt": "neon alley with signage text everywhere"}],
+                    "scene_tags": ["neon", "night"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        pipeline = CineFlowPipeline()
+        context = pipeline.run(
+            description="A detective in black coat stands in a neon alley.",
+            num_shots=3,
+            scene_id="CONSISTENCY_SCENE_EXT",
+            use_llm=False,
+            emotion_override="tense",
+        )
+        package = pipeline.build_storyboard_package(
+            context,
+            project_name="Consistency Filter",
+            reference_roots=[generated_root, external_root],
+        )
+
+        assert package.consistency_package is not None
+        scene_candidates = package.consistency_package.scene_candidates
+        assert scene_candidates
+        assert all("autocineflow" not in candidate.source_root.lower() for candidate in scene_candidates)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

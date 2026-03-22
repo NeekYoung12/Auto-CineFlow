@@ -49,6 +49,11 @@ def default_reference_roots() -> list[Path]:
     return [path for path in candidates if path.exists()]
 
 
+def _is_generated_scene_source(source_root: str) -> bool:
+    normalized = source_root.replace("\\", "/").lower().rstrip("/")
+    return normalized.endswith("/autocineflow/out") or normalized.endswith("/out")
+
+
 def _flatten_unique(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -131,6 +136,7 @@ def build_consistency_package(
     reference_library: ReferenceLibrary | None = None,
     character_top_k: int = 3,
     scene_top_k: int = 4,
+    allow_generated_scene_refs: bool = False,
 ) -> ConsistencyPackage:
     """Build a consistency package from retrieved character and scene references."""
 
@@ -202,7 +208,14 @@ def build_consistency_package(
             " ".join(context.scene_tags),
         ]
     ).strip()
-    scene_candidates = retrieve_scene_assets(library, scene_query, top_k=scene_top_k)
+    retrieved_scene_candidates = retrieve_scene_assets(library, scene_query, top_k=max(scene_top_k * 2, scene_top_k))
+    scene_candidates = [
+        candidate
+        for candidate in retrieved_scene_candidates
+        if allow_generated_scene_refs or not _is_generated_scene_source(candidate.source_root)
+    ][:scene_top_k]
+    if not scene_candidates:
+        scene_candidates = retrieved_scene_candidates[:scene_top_k]
     scene_images: list[str] = []
     scene_clips: list[str] = []
     palette_signature: list[float] = []
