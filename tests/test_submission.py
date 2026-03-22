@@ -83,6 +83,8 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     assert comfy_jobs[0].payload["workflow"]["seed"] == package.shots[0].render_seed
     assert minimax_jobs[0].payload["model"] == "image-01"
     assert minimax_jobs[0].payload["aspect_ratio"] == "16:9"
+    assert minimax_jobs[0].payload["seed"] == package.shots[0].render_seed
+    assert "metadata" not in minimax_jobs[0].payload
 
 
 def test_submit_jobs_to_filesystem_queue():
@@ -141,6 +143,7 @@ def test_submit_jobs_to_minimax_api_backend(monkeypatch):
         assert url == "https://api.example.invalid/v1/image_generation"
         assert headers["Authorization"] == "Bearer sk-media"
         assert json["model"] == "image-01"
+        assert "metadata" not in json
         return DummyResponse()
 
     monkeypatch.setattr(httpx, "post", fake_post)

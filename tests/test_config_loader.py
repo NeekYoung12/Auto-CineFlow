@@ -111,6 +111,29 @@ def test_parse_sectioned_config_handles_duplicate_keys_by_section():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_parse_sectioned_config_supports_bare_section_headers():
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Image or Video Generation:",
+                    "API_KEY=sk-media",
+                    "Kimi-Code",
+                    "API_KEY=sk-kimi",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        sections = parse_sectioned_config(config_path)
+        assert sections["Image or Video Generation"]["API_KEY"] == "sk-media"
+        assert sections["Kimi-Code"]["API_KEY"] == "sk-kimi"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def test_resolve_minimax_media_settings_reads_media_section():
     temp_dir = _workspace_temp_dir()
     try:

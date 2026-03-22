@@ -92,6 +92,13 @@ from .submission_monitor import (
     submission_monitor_report_json,
     write_submission_monitor_report,
 )
+from .result_ingest import (
+    ArtifactDownloadBatch,
+    artifact_download_batch_json,
+    download_submission_artifacts,
+    update_render_manifest_from_downloads,
+    write_artifact_download_batch,
+)
 from .prompt_builder import attach_prompts
 from .script_analyzer import analyse_script
 from .spatial_solver import positions_to_controlnet
@@ -770,3 +777,35 @@ class CineFlowPipeline:
         """Write submission monitor outputs to disk."""
 
         return write_submission_monitor_report(report, output_dir)
+
+    def download_submission_artifacts(
+        self,
+        batch: SubmissionBatch,
+        output_dir: str | Path,
+    ) -> ArtifactDownloadBatch:
+        """Download URL-based artifacts referenced by a submission batch."""
+
+        return download_submission_artifacts(batch, output_dir)
+
+    def artifact_download_batch_json(self, batch: ArtifactDownloadBatch, indent: int = 2) -> str:
+        """Serialise an artifact download batch."""
+
+        return artifact_download_batch_json(batch, indent=indent)
+
+    def write_artifact_download_batch(
+        self,
+        batch: ArtifactDownloadBatch,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write artifact download metadata to disk."""
+
+        return write_artifact_download_batch(batch, output_dir)
+
+    def update_render_manifest_from_downloads(
+        self,
+        manifest_path: str | Path,
+        downloads: ArtifactDownloadBatch,
+    ):
+        """Sync successful artifact downloads back into a render manifest."""
+
+        return update_render_manifest_from_downloads(manifest_path, downloads)

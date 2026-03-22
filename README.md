@@ -289,8 +289,24 @@ python -m uv run python -m autocineflow.submission ^
   --package-file out\scene_10\storyboard_package.json ^
   --provider minimax_image ^
   --backend minimax_api ^
+  --config-path D:\Codex\workspace\config\conf ^
   --output-dir out\submission_records ^
-  --config-path D:\Codex\workspace\config\conf
+  --spool-dir ""
+```
+
+## End-to-End Scene Runner
+
+To run one scene through generation, packaging, MiniMax submission, artifact download, and render QA:
+
+```bash
+python -m uv run python -m autocineflow.scene_runner ^
+  --description "A detective faces a wounded informant in a neon alley at night." ^
+  --scene-id SCENE_20 ^
+  --output-dir out\scene_20_run ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --provider minimax_image ^
+  --backend minimax_api ^
+  --job-limit 1
 ```
 
 ## Submission Monitoring

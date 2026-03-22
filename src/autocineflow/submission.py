@@ -100,8 +100,11 @@ def build_submission_jobs_from_package(
                     "model": "image-01",
                     "prompt": job.prompt,
                     "aspect_ratio": _aspect_ratio_label(job.width, job.height),
+                    "response_format": "url",
+                    "seed": job.render_seed,
                     "n": 1,
-                    "metadata": dict(job.metadata),
+                    "prompt_optimizer": False,
+                    "aigc_watermark": False,
                 },
             )
             for job in package.render_queue
@@ -161,8 +164,11 @@ def build_submission_jobs_from_execution_plan(
                 "model": "image-01",
                 "prompt": item.get("prompt", ""),
                 "aspect_ratio": _aspect_ratio_label(width, height),
+                "response_format": "url",
+                "seed": int(item.get("render_seed", 0)),
                 "n": 1,
-                "metadata": dict(item.get("metadata", {})),
+                "prompt_optimizer": False,
+                "aigc_watermark": False,
             }
         else:
             payload = dict(item)

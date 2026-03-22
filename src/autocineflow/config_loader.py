@@ -44,12 +44,9 @@ def parse_sectioned_config(path: str | Path) -> dict[str, dict[str, str]]:
         if not line:
             continue
 
-        if line.endswith(":") and "=" not in line:
-            current_section = line[:-1].strip()
-            sections.setdefault(current_section, {})
-            continue
-
         if "=" not in line:
+            current_section = line[:-1].strip() if line.endswith(":") else line.strip()
+            sections.setdefault(current_section, {})
             continue
 
         key, value = line.split("=", 1)
