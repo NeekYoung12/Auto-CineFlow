@@ -10,7 +10,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from .config_loader import resolve_local_vlm_settings
-from .keyframe_qa import KeyframeQAReport
+from .keyframe_qa import KeyframeQAReport, keyframe_qa_report
+from .result_ingest import ArtifactDownloadBatch, ArtifactDownloadRecord
 
 
 class LocalVisualReviewResult(BaseModel):
@@ -120,6 +121,31 @@ def review_keyframes_with_local_vlm(
     )
 
 
+def build_keyframe_download_batch_from_dir(
+    artifacts_dir: str | Path,
+    source_id: str = "KEYFRAME_REVIEW",
+) -> ArtifactDownloadBatch:
+    """Build a download-like batch from an existing directory of keyframe images."""
+
+    artifacts_dir = Path(artifacts_dir)
+    records: list[ArtifactDownloadRecord] = []
+    for path in sorted(artifacts_dir.glob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".bmp", ".webp"}:
+            continue
+        records.append(
+            ArtifactDownloadRecord(
+                job_id=path.stem,
+                shot_id=path.stem,
+                url="",
+                output_path=str(path),
+                downloaded=True,
+            )
+        )
+    return ArtifactDownloadBatch(source_id=source_id, records=records)
+
+
 def write_local_visual_review_report(report: LocalVisualReviewReport, output_dir: str | Path) -> dict[str, Path]:
     """Write local visual review outputs to disk."""
 
@@ -128,3 +154,54 @@ def write_local_visual_review_report(report: LocalVisualReviewReport, output_dir
     json_path = output_dir / "local_visual_review_report.json"
     json_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     return {"report_json": json_path}
+
+
+def main() -> int:
+    """CLI entry point for local visual keyframe review."""
+
+    import argparse
+
+    from .keyframe_qa import KeyframeQAReport
+
+    parser = argparse.ArgumentParser(description="Run optional local visual review on keyframe images.")
+    parser.add_argument("--artifacts-dir", default="", help="Directory containing keyframe images")
+    parser.add_argument("--keyframe-qa-file", default="", help="Existing keyframe_qa_report.json")
+    parser.add_argument("--source-id", default="KEYFRAME_REVIEW", help="Source identifier for ad-hoc review")
+    parser.add_argument("--config-path", default=None, help="Path to config file")
+    parser.add_argument("--output-dir", required=True, help="Directory for review outputs")
+    parser.add_argument("--timeout-seconds", type=float, default=600.0, help="Timeout for the external VLM subprocess")
+    args = parser.parse_args()
+
+    if not args.artifacts_dir and not args.keyframe_qa_file:
+        raise SystemExit("Provide --artifacts-dir or --keyframe-qa-file.")
+
+    if args.keyframe_qa_file:
+        keyframe_report = KeyframeQAReport.model_validate_json(Path(args.keyframe_qa_file).read_text(encoding="utf-8"))
+    else:
+        downloads = build_keyframe_download_batch_from_dir(args.artifacts_dir, source_id=args.source_id)
+        keyframe_report = keyframe_qa_report(downloads)
+
+    review_report = review_keyframes_with_local_vlm(
+        keyframe_report,
+        config_path=args.config_path,
+        timeout_seconds=args.timeout_seconds,
+    )
+    output_files = write_local_visual_review_report(review_report, args.output_dir)
+    print(
+        json.dumps(
+            {
+                "source_id": review_report.source_id,
+                "enabled": review_report.enabled,
+                "skipped": review_report.skipped,
+                "result_count": len(review_report.results),
+                "output_files": {key: str(value) for key, value in output_files.items()},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

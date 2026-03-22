@@ -470,6 +470,16 @@ python -m uv run python -m autocineflow.scene_runner ^
   --enable-local-vlm-review
 ```
 
+You can also review an existing keyframe directory without rerunning the whole scene pipeline:
+
+```bash
+python -m uv run python -m autocineflow.local_visual_review ^
+  --artifacts-dir out\scene_runninghub_rebuild_prod\rebuild_keyframes\artifacts ^
+  --source-id SCENE_RUNNINGHUB_REBUILD_PROD ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --output-dir out\scene_runninghub_rebuild_prod\local_visual_review
+```
+
 If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
 
 ```bash
