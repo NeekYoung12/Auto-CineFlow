@@ -282,6 +282,17 @@ This writes:
 - `submission_batch.json`
 - `submission_batch.md`
 
+You can also submit directly to MiniMax image generation if your config file contains a valid media API key:
+
+```bash
+python -m uv run python -m autocineflow.submission ^
+  --package-file out\scene_10\storyboard_package.json ^
+  --provider minimax_image ^
+  --backend minimax_api ^
+  --output-dir out\submission_records ^
+  --config-path D:\Codex\workspace\config\conf
+```
+
 ## Submission Monitoring
 
 For filesystem-backed queues you can monitor batch progress:

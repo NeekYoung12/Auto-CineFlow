@@ -8,6 +8,8 @@ from autocineflow.config_loader import (
     discover_default_config_path,
     normalize_openai_base_url,
     parse_key_value_config,
+    parse_sectioned_config,
+    resolve_minimax_media_settings,
     resolve_openai_settings,
 )
 
@@ -84,3 +86,48 @@ def test_normalize_openai_base_url_appends_v1():
     assert normalize_openai_base_url("https://example.invalid") == "https://example.invalid/v1"
     assert normalize_openai_base_url("https://example.invalid/custom") == "https://example.invalid/custom/v1"
     assert normalize_openai_base_url("https://example.invalid/v1") == "https://example.invalid/v1"
+
+
+def test_parse_sectioned_config_handles_duplicate_keys_by_section():
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "MiniMax:",
+                    "OPENAI_API_KEY=sk-openai",
+                    "Image or Video Generation:",
+                    "API_KEY=sk-media",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        sections = parse_sectioned_config(config_path)
+        assert sections["MiniMax"]["OPENAI_API_KEY"] == "sk-openai"
+        assert sections["Image or Video Generation"]["API_KEY"] == "sk-media"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_resolve_minimax_media_settings_reads_media_section():
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Image or Video Generation:",
+                    "API_KEY=sk-media",
+                    "MINIMAX_BASE_URL=https://api.example.invalid/v1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        api_key, base_url = resolve_minimax_media_settings(config_path)
+        assert api_key == "sk-media"
+        assert base_url == "https://api.example.invalid/v1"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

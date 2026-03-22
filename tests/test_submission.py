@@ -5,6 +5,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import httpx
+
 from autocineflow.pipeline import CineFlowPipeline
 from autocineflow.project_delivery import ProjectSceneInput
 from autocineflow.submission import SubmissionBackend, SubmissionProvider, SubmissionTarget
@@ -71,12 +73,16 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     generic_jobs = pipeline.build_submission_jobs_from_package(package)
     a1111_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.AUTOMATIC1111)
     comfy_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.COMFYUI)
+    minimax_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_IMAGE)
 
     assert len(generic_jobs) == 5
     assert len(a1111_jobs) == 5
     assert len(comfy_jobs) == 5
+    assert len(minimax_jobs) == 5
     assert a1111_jobs[0].payload["seed"] == package.shots[0].render_seed
     assert comfy_jobs[0].payload["workflow"]["seed"] == package.shots[0].render_seed
+    assert minimax_jobs[0].payload["model"] == "image-01"
+    assert minimax_jobs[0].payload["aspect_ratio"] == "16:9"
 
 
 def test_submit_jobs_to_filesystem_queue():
@@ -112,6 +118,57 @@ def test_submit_jobs_from_execution_plan_dry_run():
         assert all(record.status == "dry_run" for record in batch.records)
         payload = json.loads(pipeline.submission_batch_json(batch, indent=2))
         assert payload["source_type"] == "execution_plan"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_submit_jobs_to_minimax_api_backend(monkeypatch):
+    pipeline, package = _build_package()
+    jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_IMAGE)
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "minimax-job-1", "data": {"image_urls": ["https://example.invalid/image.png"]}}
+
+        @property
+        def text(self):
+            return '{"ok":true}'
+
+    def fake_post(url, headers, json, timeout):
+        assert url == "https://api.example.invalid/v1/image_generation"
+        assert headers["Authorization"] == "Bearer sk-media"
+        assert json["model"] == "image-01"
+        return DummyResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Image or Video Generation:",
+                    "API_KEY=sk-media",
+                    "MINIMAX_BASE_URL=https://api.example.invalid/v1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        batch = pipeline.submit_jobs(
+            jobs[:1],
+            SubmissionTarget(
+                backend=SubmissionBackend.MINIMAX_API,
+                config_path=str(config_path),
+            ),
+            source_type="package",
+            source_id=package.scene_id,
+        )
+        assert batch.records[0].status == "submitted"
+        assert batch.records[0].backend_job_id == "minimax-job-1"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

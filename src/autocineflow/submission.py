@@ -8,8 +8,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 
+from .config_loader import resolve_minimax_media_settings
 from .delivery import StoryboardPackage
 from .execution_planner import ProjectExecutionPlan
 from .provider_payloads import automatic1111_bundle, comfyui_bundle
@@ -21,6 +23,7 @@ class SubmissionBackend(str, Enum):
     FILESYSTEM = "filesystem"
     WEBHOOK = "webhook"
     DRY_RUN = "dry_run"
+    MINIMAX_API = "minimax_api"
 
 
 class SubmissionProvider(str, Enum):
@@ -29,6 +32,7 @@ class SubmissionProvider(str, Enum):
     GENERIC = "generic"
     AUTOMATIC1111 = "automatic1111"
     COMFYUI = "comfyui"
+    MINIMAX_IMAGE = "minimax_image"
 
 
 class SubmissionTarget(BaseModel):
@@ -39,6 +43,7 @@ class SubmissionTarget(BaseModel):
     webhook_url: str = ""
     headers: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=30.0, ge=0.1)
+    config_path: str = ""
 
 
 class SubmissionJob(BaseModel):
@@ -83,6 +88,24 @@ def build_submission_jobs_from_package(
     provider: SubmissionProvider = SubmissionProvider.GENERIC,
 ) -> list[SubmissionJob]:
     """Build submission jobs from a scene package."""
+
+    if provider == SubmissionProvider.MINIMAX_IMAGE:
+        return [
+            SubmissionJob(
+                job_id=job.job_id,
+                shot_id=job.shot_id,
+                scene_id=job.metadata.get("scene_id", package.scene_id),
+                provider=provider,
+                payload={
+                    "model": "image-01",
+                    "prompt": job.prompt,
+                    "aspect_ratio": _aspect_ratio_label(job.width, job.height),
+                    "n": 1,
+                    "metadata": dict(job.metadata),
+                },
+            )
+            for job in package.render_queue
+        ]
 
     if provider == SubmissionProvider.AUTOMATIC1111:
         bundle = automatic1111_bundle(package)
@@ -129,16 +152,46 @@ def build_submission_jobs_from_execution_plan(
     """Build submission jobs from a project execution plan."""
 
     queue = plan.ordered_rerender_queue or plan.rerender_queue
-    return [
-        SubmissionJob(
-            job_id=item["job_id"],
-            shot_id=item["shot_id"],
-            scene_id=item.get("metadata", {}).get("scene_id", ""),
-            provider=provider,
-            payload=dict(item),
+    jobs: list[SubmissionJob] = []
+    for item in queue:
+        if provider == SubmissionProvider.MINIMAX_IMAGE:
+            width = int(item.get("width", 1536))
+            height = int(item.get("height", 864))
+            payload = {
+                "model": "image-01",
+                "prompt": item.get("prompt", ""),
+                "aspect_ratio": _aspect_ratio_label(width, height),
+                "n": 1,
+                "metadata": dict(item.get("metadata", {})),
+            }
+        else:
+            payload = dict(item)
+
+        jobs.append(
+            SubmissionJob(
+                job_id=item["job_id"],
+                shot_id=item["shot_id"],
+                scene_id=item.get("metadata", {}).get("scene_id", ""),
+                provider=provider,
+                payload=payload,
+            )
         )
-        for item in queue
-    ]
+    return jobs
+
+
+def _aspect_ratio_label(width: int, height: int) -> str:
+    """Map width/height to the closest supported aspect-ratio label."""
+
+    ratio = width / max(height, 1)
+    supported = {
+        "21:9": 21 / 9,
+        "16:9": 16 / 9,
+        "4:3": 4 / 3,
+        "1:1": 1.0,
+        "3:4": 3 / 4,
+        "9:16": 9 / 16,
+    }
+    return min(supported, key=lambda label: abs(supported[label] - ratio))
 
 
 def _submit_to_filesystem(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
@@ -164,8 +217,6 @@ def _submit_to_filesystem(job: SubmissionJob, target: SubmissionTarget) -> Submi
 def _submit_to_webhook(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
     """Submit a job to a generic webhook endpoint."""
 
-    import httpx
-
     if not target.webhook_url:
         raise ValueError("webhook_url is required for webhook submissions.")
 
@@ -188,6 +239,44 @@ def _submit_to_webhook(job: SubmissionJob, target: SubmissionTarget) -> Submissi
         submitted_at=datetime.now(timezone.utc).isoformat(),
         backend_job_id=backend_job_id,
         message=response.text[:300],
+    )
+
+
+def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
+    """Submit an image generation request to the MiniMax media API."""
+
+    api_key, base_url = resolve_minimax_media_settings(target.config_path or None)
+    if not api_key:
+        raise ValueError("MiniMax media API key not found in config.")
+
+    response = httpx.post(
+        f"{base_url}/image_generation",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=job.payload,
+        timeout=target.timeout_seconds,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    image_url = ""
+    if isinstance(payload, dict):
+        data = payload.get("data", {})
+        if isinstance(data, dict):
+            image_urls = data.get("image_urls", [])
+            if image_urls:
+                image_url = str(image_urls[0])
+
+    return SubmissionRecord(
+        job_id=job.job_id,
+        shot_id=job.shot_id,
+        provider=job.provider,
+        backend=target.backend,
+        status="submitted",
+        submitted_at=datetime.now(timezone.utc).isoformat(),
+        backend_job_id=str(payload.get("id", "")) if isinstance(payload, dict) else "",
+        message=image_url or response.text[:300],
     )
 
 
@@ -217,6 +306,8 @@ def submit_jobs(
     for job in jobs:
         if target.backend == SubmissionBackend.FILESYSTEM:
             record = _submit_to_filesystem(job, target)
+        elif target.backend == SubmissionBackend.MINIMAX_API:
+            record = _submit_to_minimax_api(job, target)
         elif target.backend == SubmissionBackend.WEBHOOK:
             record = _submit_to_webhook(job, target)
         else:
@@ -301,6 +392,7 @@ def main() -> int:
     parser.add_argument("--backend", default="dry_run", choices=[item.value for item in SubmissionBackend])
     parser.add_argument("--spool-dir", default="", help="Filesystem spool directory")
     parser.add_argument("--webhook-url", default="", help="Webhook endpoint")
+    parser.add_argument("--config-path", default="", help="Path to config file for API-backed submissions")
     parser.add_argument("--output-dir", required=True, help="Directory for submission outputs")
     args = parser.parse_args()
 
@@ -313,6 +405,7 @@ def main() -> int:
         backend=backend,
         spool_dir=args.spool_dir,
         webhook_url=args.webhook_url,
+        config_path=args.config_path,
     )
 
     if args.package_file:

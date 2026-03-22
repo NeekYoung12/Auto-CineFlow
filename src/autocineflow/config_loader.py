@@ -1,4 +1,4 @@
-"""Helpers for resolving OpenAI-compatible credentials from env or local config."""
+"""Helpers for resolving API credentials from env or local config."""
 
 from __future__ import annotations
 
@@ -26,6 +26,39 @@ def parse_key_value_config(path: str | Path) -> dict[str, str]:
         if cleaned_key and cleaned_value:
             values[cleaned_key] = cleaned_value
     return values
+
+
+def parse_sectioned_config(path: str | Path) -> dict[str, dict[str, str]]:
+    """Parse a loose config file with `Section:` headers and `KEY=VALUE` entries."""
+
+    resolved = Path(path)
+    if not resolved.exists():
+        return {}
+
+    sections: dict[str, dict[str, str]] = {}
+    current_section = "__root__"
+    sections[current_section] = {}
+
+    for raw_line in resolved.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.endswith(":") and "=" not in line:
+            current_section = line[:-1].strip()
+            sections.setdefault(current_section, {})
+            continue
+
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        cleaned_key = key.strip()
+        cleaned_value = value.strip().strip('"').strip("'")
+        if cleaned_key and cleaned_value:
+            sections.setdefault(current_section, {})[cleaned_key] = cleaned_value
+
+    return sections
 
 
 def discover_default_config_path(start: str | Path | None = None) -> Path | None:
@@ -97,3 +130,21 @@ def resolve_openai_settings(
         or None
     )
     return resolved_api_key, normalize_openai_base_url(resolved_base_url)
+
+
+def resolve_minimax_media_settings(
+    config_path: str | Path | None = None,
+) -> tuple[str, str]:
+    """Resolve MiniMax image/video credentials from a sectioned config file."""
+
+    resolved_config = Path(config_path) if config_path else discover_default_config_path()
+    sections = parse_sectioned_config(resolved_config) if resolved_config else {}
+    section = sections.get("Image or Video Generation", {})
+
+    api_key = (
+        section.get("API_KEY")
+        or section.get("MINIMAX_API_KEY")
+        or ""
+    )
+    base_url = section.get("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
+    return api_key, base_url.rstrip("/")
