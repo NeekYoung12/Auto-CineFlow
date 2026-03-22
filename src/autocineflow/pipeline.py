@@ -963,10 +963,18 @@ class CineFlowPipeline:
         project: ProjectPackage,
         render_qa: ProjectRenderQAReport | None = None,
         execution_plan: ProjectExecutionPlan | None = None,
+        asset_library: AssetLibrary | None = None,
+        scenes_dir: str | Path | None = None,
     ) -> ProjectDashboard:
         """Build a unified project dashboard."""
 
-        return build_project_dashboard(project, render_qa=render_qa, execution_plan=execution_plan)
+        return build_project_dashboard(
+            project,
+            render_qa=render_qa,
+            execution_plan=execution_plan,
+            asset_library=asset_library,
+            scenes_dir=scenes_dir,
+        )
 
     def project_dashboard_json(self, dashboard: ProjectDashboard, indent: int = 2) -> str:
         """Serialise a project dashboard."""

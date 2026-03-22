@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config_loader import resolve_runninghub_workflow_ids
 from .delivery import RenderPreset
 from .pipeline import CineFlowPipeline
-from .submission import SubmissionBackend, SubmissionJob, SubmissionProvider, SubmissionTarget
+from .submission import (
+    SubmissionBackend,
+    SubmissionBatch,
+    SubmissionJob,
+    SubmissionProvider,
+    SubmissionTarget,
+)
 
 
 def _is_runninghub_video_provider(provider: SubmissionProvider) -> bool:
@@ -146,6 +153,10 @@ def _merge_file_maps(*file_maps: dict[str, str]) -> dict[str, str]:
     return merged
 
 
+def _should_block_video_from_keyframes(provider: SubmissionProvider, report) -> bool:
+    return _is_runninghub_video_provider(provider) and not report.passes_gate
+
+
 def main() -> int:
     """CLI entry point for the end-to-end scene run."""
 
@@ -177,6 +188,7 @@ def main() -> int:
     parser.add_argument("--disable-runninghub-keyframe-rebuild", action="store_true", help="Do not run the second-pass high-fidelity keyframe rebuild before video generation")
     parser.add_argument("--disable-video-enhance", action="store_true", help="Do not run local FFmpeg-based enhancement after video download")
     parser.add_argument("--disable-runninghub-ai-post", action="store_true", help="Do not run the optional RunningHub AI video post-enhancement stage")
+    parser.add_argument("--allow-keyframe-qa-fail", action="store_true", help="Allow video generation even if final keyframe QA does not pass")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -220,6 +232,7 @@ def main() -> int:
     selected_jobs = jobs if args.job_limit <= 0 else jobs[: args.job_limit]
     bootstrap_files = {}
     keyframe_qa_files = {}
+    keyframe_gate_blocked = False
     provider = SubmissionProvider(args.provider)
     backend = SubmissionBackend(args.backend)
     target = SubmissionTarget(
@@ -384,14 +397,39 @@ def main() -> int:
                     rebuild_downloads = pipeline.select_best_keyframe_downloads(bootstrap_downloads)
             else:
                 rebuild_downloads = pipeline.select_best_keyframe_downloads(bootstrap_downloads)
-            selected_jobs = _inject_bootstrap_keyframes(selected_jobs, rebuild_downloads)
+            final_keyframe_report = pipeline.keyframe_qa_report(rebuild_downloads)
+            keyframe_qa_files.update(
+                {
+                    f"selected_{key}": str(value)
+                    for key, value in pipeline.write_keyframe_qa_report(
+                        final_keyframe_report,
+                        output_dir / "keyframe_qc",
+                    ).items()
+                }
+            )
+            if _should_block_video_from_keyframes(provider, final_keyframe_report) and not args.allow_keyframe_qa_fail:
+                keyframe_gate_blocked = True
+                selected_jobs = []
+            else:
+                selected_jobs = _inject_bootstrap_keyframes(selected_jobs, rebuild_downloads)
 
-    submission_batch = pipeline.submit_jobs(
-        selected_jobs,
-        target,
-        source_type="package",
-        source_id=package.scene_id,
-    )
+    if keyframe_gate_blocked:
+        submission_batch = SubmissionBatch(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            provider=provider,
+            backend=backend,
+            source_type="package_blocked_by_keyframe_gate",
+            source_id=package.scene_id,
+            job_count=0,
+            records=[],
+        )
+    else:
+        submission_batch = pipeline.submit_jobs(
+            selected_jobs,
+            target,
+            source_type="package",
+            source_id=package.scene_id,
+        )
     recovery_plan = pipeline.build_recovery_plan(submission_batch)
     recovery_files = pipeline.write_recovery_plan(recovery_plan, output_dir / "recovery")
 
@@ -423,7 +461,7 @@ def main() -> int:
     sequence_files = {}
     enhance_files = {}
     ai_post_files = {}
-    if not args.skip_download and not recovery_plan.queue_paused:
+    if not args.skip_download and not recovery_plan.queue_paused and not keyframe_gate_blocked:
         downloads = pipeline.download_submission_artifacts(
             submission_batch,
             output_dir / "artifacts",
@@ -563,6 +601,7 @@ def main() -> int:
                 "submitted_jobs": len(selected_jobs),
                 "downloaded_artifacts": sum(record.downloaded for record in downloads.records) if downloads else 0,
                 "queue_paused": recovery_plan.queue_paused,
+                "keyframe_gate_blocked": keyframe_gate_blocked,
                 "bootstrap_files": bootstrap_files,
                 "keyframe_qa_files": keyframe_qa_files,
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},

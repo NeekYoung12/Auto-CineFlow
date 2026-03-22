@@ -25,6 +25,8 @@ class SceneAssetVersion(BaseModel):
     total_duration_seconds: float = Field(..., ge=0.1)
     shot_count: int = Field(..., ge=1)
     quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    keyframe_qa_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    keyframe_gate_passed: Optional[bool] = None
     render_qa_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     sequence_qa_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     submission_count: int = Field(default=0, ge=0)
@@ -46,6 +48,7 @@ class ProjectAssetVersion(BaseModel):
     scene_count: int = Field(..., ge=1)
     total_duration_seconds: float = Field(..., ge=0.1)
     average_quality_score: float = Field(..., ge=0.0, le=1.0)
+    average_keyframe_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     average_render_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     reuse_count: int = Field(default=0, ge=0)
     rerender_count: int = Field(default=0, ge=0)
@@ -98,6 +101,7 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
 
     render_qa_payload = _maybe_json(output_root / "qa" / "render_qa_report.json")
     sequence_qa_payload = _maybe_json(output_root / "sequence_qc" / "sequence_qa_report.json")
+    keyframe_qa_payload = _maybe_json(output_root / "keyframe_qc" / "keyframe_qa_report.json")
     submission_payload = _maybe_json(output_root / "submission" / "submission_batch.json")
     recovery_payload = _maybe_json(output_root / "recovery" / "recovery_plan.json")
 
@@ -129,6 +133,16 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
         total_duration_seconds=package.total_duration_seconds,
         shot_count=len(package.shots),
         quality_score=float(package.quality_report.get("score", 0.0)),
+        keyframe_qa_score=(
+            float(keyframe_qa_payload.get("score"))
+            if keyframe_qa_payload and "score" in keyframe_qa_payload
+            else None
+        ),
+        keyframe_gate_passed=(
+            bool(keyframe_qa_payload.get("passes_gate"))
+            if keyframe_qa_payload and "passes_gate" in keyframe_qa_payload
+            else None
+        ),
         render_qa_score=float(render_qa_payload.get("score")) if render_qa_payload and "score" in render_qa_payload else None,
         sequence_qa_score=float(sequence_qa_payload.get("score")) if sequence_qa_payload and "score" in sequence_qa_payload else None,
         submission_count=submission_count,
@@ -157,6 +171,7 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
     total_failed_submissions = 0
     total_recovery_decisions = 0
     queue_paused = False
+    keyframe_scores: list[float] = []
     if dashboard_payload:
         reuse_count = int(dashboard_payload.get("total_reuse_count", 0))
         rerender_count = int(dashboard_payload.get("total_rerender_count", 0))
@@ -170,6 +185,8 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
         total_failed_submissions += scene_version.failed_submission_count
         total_recovery_decisions += scene_version.recovery_decision_count
         queue_paused = queue_paused or scene_version.queue_paused
+        if scene_version.keyframe_qa_score is not None:
+            keyframe_scores.append(scene_version.keyframe_qa_score)
 
     return ProjectAssetVersion(
         project_name=package.project_name,
@@ -179,6 +196,11 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
         scene_count=package.scene_count,
         total_duration_seconds=package.total_duration_seconds,
         average_quality_score=package.average_quality_score,
+        average_keyframe_score=(
+            round(sum(keyframe_scores) / len(keyframe_scores), 4)
+            if keyframe_scores
+            else None
+        ),
         average_render_score=(
             float(project_render_qa.get("average_score"))
             if project_render_qa and "average_score" in project_render_qa
@@ -260,6 +282,8 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Project: `{scene.project_name}`",
                 f"- Generated At: `{scene.generated_at}`",
                 f"- Quality: `{scene.quality_score:.3f}`",
+                f"- Keyframe QA: `{scene.keyframe_qa_score if scene.keyframe_qa_score is not None else 'n/a'}`",
+                f"- Keyframe Pass: `{scene.keyframe_gate_passed if scene.keyframe_gate_passed is not None else 'n/a'}`",
                 f"- Render QA: `{scene.render_qa_score if scene.render_qa_score is not None else 'n/a'}`",
                 f"- Sequence QA: `{scene.sequence_qa_score if scene.sequence_qa_score is not None else 'n/a'}`",
                 f"- Failed Submissions: `{scene.failed_submission_count}`",
@@ -278,6 +302,7 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Generated At: `{project.generated_at}`",
                 f"- Scenes: `{project.scene_count}`",
                 f"- Avg Quality: `{project.average_quality_score:.3f}`",
+                f"- Avg Keyframe QA: `{project.average_keyframe_score if project.average_keyframe_score is not None else 'n/a'}`",
                 f"- Avg Render QA: `{project.average_render_score if project.average_render_score is not None else 'n/a'}`",
                 f"- Reuse / Rerender: `{project.reuse_count}/{project.rerender_count}`",
                 f"- Failed Submissions: `{project.total_failed_submissions}`",

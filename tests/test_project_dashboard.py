@@ -58,15 +58,39 @@ def test_project_dashboard_combines_storyboard_render_and_execution_data():
     try:
         previous_files = pipeline.write_project_package(previous, temp_dir / "previous")
         _mark_render_manifest_rendered(previous_files["scenes_dir"])
+        scene_dir = previous_files["scenes_dir"] / "scene-a"
+        (scene_dir / "keyframe_qc").mkdir(exist_ok=True)
+        (scene_dir / "keyframe_qc" / "keyframe_qa_report.json").write_text(
+            json.dumps(
+                {
+                    "source_id": "SCENE_A",
+                    "score": 0.91,
+                    "min_score": 0.75,
+                    "passes_gate": True,
+                    "results": [],
+                    "critical_issues": [],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         render_report = pipeline.build_project_render_qa_report(previous, previous_files["scenes_dir"], min_score=0.9)
         execution_plan = pipeline.build_project_execution_plan(previous, current, previous_files["scenes_dir"])
-        dashboard = pipeline.build_project_dashboard(current, render_qa=render_report, execution_plan=execution_plan)
+        dashboard = pipeline.build_project_dashboard(
+            current,
+            render_qa=render_report,
+            execution_plan=execution_plan,
+            scenes_dir=previous_files["scenes_dir"],
+        )
 
         assert dashboard.scene_count == 1
         assert dashboard.storyboard_ready_count == 1
+        assert dashboard.keyframe_ready_count == 1
         assert dashboard.render_ready_count == 1
         assert dashboard.total_reuse_count == 5
         assert dashboard.total_rerender_count == 0
+        assert dashboard.scene_rows[0].keyframe_passes is True
         assert dashboard.scene_rows[0].overall_status == "ready"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

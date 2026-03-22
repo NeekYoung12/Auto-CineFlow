@@ -9,6 +9,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from .asset_library import AssetLibrary, latest_scene_versions
+from .delivery import slugify
 from .execution_planner import ProjectExecutionPlan
 from .project_delivery import ProjectPackage
 from .project_render_qa import ProjectRenderQAReport
@@ -20,6 +22,8 @@ class ProjectDashboardScene(BaseModel):
     scene_id: str
     storyboard_quality_score: float = Field(..., ge=0.0, le=1.0)
     storyboard_passes: bool
+    keyframe_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    keyframe_passes: Optional[bool] = None
     render_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     render_passes: Optional[bool] = None
     reuse_count: int = Field(default=0, ge=0)
@@ -34,10 +38,12 @@ class ProjectDashboard(BaseModel):
     generated_at: str
     scene_count: int = Field(..., ge=1)
     storyboard_ready_count: int = Field(..., ge=0)
+    keyframe_ready_count: int = Field(..., ge=0)
     render_ready_count: int = Field(..., ge=0)
     total_reuse_count: int = Field(..., ge=0)
     total_rerender_count: int = Field(..., ge=0)
     all_storyboard_ready: bool
+    all_keyframes_ready: bool
     all_render_ready: bool
     scene_rows: list[ProjectDashboardScene] = Field(default_factory=list)
 
@@ -46,16 +52,34 @@ def build_project_dashboard(
     project: ProjectPackage,
     render_qa: ProjectRenderQAReport | None = None,
     execution_plan: ProjectExecutionPlan | None = None,
+    asset_library: AssetLibrary | None = None,
+    scenes_dir: str | Path | None = None,
 ) -> ProjectDashboard:
     """Build a project dashboard from available project reports."""
 
     render_rows = {row.scene_id: row for row in (render_qa.scene_results if render_qa else [])}
     execution_rows = {row.scene_id: row for row in (execution_plan.scene_summaries if execution_plan else [])}
+    keyframe_rows: dict[str, tuple[Optional[float], Optional[bool]]] = {}
+    if asset_library is not None:
+        for scene in latest_scene_versions(asset_library):
+            keyframe_rows[scene.scene_id] = (scene.keyframe_qa_score, scene.keyframe_gate_passed)
+    elif scenes_dir is not None:
+        scenes_path = Path(scenes_dir)
+        for scene_summary in project.scene_summaries:
+            scene_dir = scenes_path / slugify(scene_summary.scene_id, default=scene_summary.scene_id.lower())
+            report_path = scene_dir / "keyframe_qc" / "keyframe_qa_report.json"
+            if report_path.exists():
+                payload = json.loads(report_path.read_text(encoding="utf-8"))
+                keyframe_rows[scene_summary.scene_id] = (
+                    float(payload.get("score", 0.0)) if "score" in payload else None,
+                    bool(payload.get("passes_gate")) if "passes_gate" in payload else None,
+                )
 
     scene_rows: list[ProjectDashboardScene] = []
     for scene_summary in project.scene_summaries:
         render_row = render_rows.get(scene_summary.scene_id)
         execution_row = execution_rows.get(scene_summary.scene_id)
+        keyframe_score, keyframe_passes = keyframe_rows.get(scene_summary.scene_id, (None, None))
 
         storyboard_passes = scene_summary.passes_gate
         render_passes = render_row.passes_gate if render_row else None
@@ -64,6 +88,8 @@ def build_project_dashboard(
 
         if not storyboard_passes:
             overall_status = "storyboard_blocked"
+        elif keyframe_passes is False:
+            overall_status = "keyframe_blocked"
         elif render_passes is False:
             overall_status = "render_blocked"
         elif rerender_count > 0:
@@ -78,6 +104,8 @@ def build_project_dashboard(
                 scene_id=scene_summary.scene_id,
                 storyboard_quality_score=scene_summary.quality_score,
                 storyboard_passes=storyboard_passes,
+                keyframe_score=keyframe_score,
+                keyframe_passes=keyframe_passes,
                 render_score=render_row.score if render_row else None,
                 render_passes=render_passes,
                 reuse_count=reuse_count,
@@ -87,6 +115,7 @@ def build_project_dashboard(
         )
 
     storyboard_ready_count = sum(row.storyboard_passes for row in scene_rows)
+    keyframe_ready_count = sum(row.keyframe_passes is True for row in scene_rows)
     render_ready_count = sum(row.render_passes is True for row in scene_rows)
     total_reuse_count = sum(row.reuse_count for row in scene_rows)
     total_rerender_count = sum(row.rerender_count for row in scene_rows)
@@ -96,10 +125,12 @@ def build_project_dashboard(
         generated_at=datetime.now(timezone.utc).isoformat(),
         scene_count=len(scene_rows),
         storyboard_ready_count=storyboard_ready_count,
+        keyframe_ready_count=keyframe_ready_count,
         render_ready_count=render_ready_count,
         total_reuse_count=total_reuse_count,
         total_rerender_count=total_rerender_count,
         all_storyboard_ready=storyboard_ready_count == len(scene_rows),
+        all_keyframes_ready=keyframe_ready_count == len(scene_rows) if scene_rows else False,
         all_render_ready=render_ready_count == len(scene_rows) if scene_rows else False,
         scene_rows=scene_rows,
     )
@@ -119,6 +150,7 @@ def project_dashboard_markdown(dashboard: ProjectDashboard) -> str:
         "",
         f"- Scene Count: `{dashboard.scene_count}`",
         f"- Storyboard Ready: `{dashboard.storyboard_ready_count}/{dashboard.scene_count}`",
+        f"- Keyframe Ready: `{dashboard.keyframe_ready_count}/{dashboard.scene_count}`",
         f"- Render Ready: `{dashboard.render_ready_count}/{dashboard.scene_count}`",
         f"- Reuse Count: `{dashboard.total_reuse_count}`",
         f"- Rerender Count: `{dashboard.total_rerender_count}`",
@@ -133,6 +165,8 @@ def project_dashboard_markdown(dashboard: ProjectDashboard) -> str:
                 "",
                 f"- Storyboard Quality: `{row.storyboard_quality_score:.3f}`",
                 f"- Storyboard Pass: `{row.storyboard_passes}`",
+                f"- Keyframe Score: `{row.keyframe_score if row.keyframe_score is not None else 'n/a'}`",
+                f"- Keyframe Pass: `{row.keyframe_passes if row.keyframe_passes is not None else 'n/a'}`",
                 f"- Render Score: `{row.render_score if row.render_score is not None else 'n/a'}`",
                 f"- Render Pass: `{row.render_passes if row.render_passes is not None else 'n/a'}`",
                 f"- Reuse / Rerender: `{row.reuse_count}/{row.rerender_count}`",
