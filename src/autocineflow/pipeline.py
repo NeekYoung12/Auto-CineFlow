@@ -127,6 +127,13 @@ from .sequence_qa import (
     sequence_repair_markdown,
     write_sequence_qc_outputs,
 )
+from .video_enhance import (
+    VideoEnhanceReport,
+    enhance_videos,
+    video_enhance_report_json,
+    video_enhance_report_markdown,
+    write_video_enhance_report,
+)
 from .asset_library import (
     AssetLibrary,
     build_asset_library,
@@ -1195,6 +1202,43 @@ class CineFlowPipeline:
         """Write sequence QA and repair outputs to disk."""
 
         return write_sequence_qc_outputs(report, repair_plan, output_dir)
+
+    def enhance_videos(
+        self,
+        downloads: ArtifactDownloadBatch,
+        output_dir: str | Path,
+        preset: str = "production_hd",
+        ffmpeg_bin: str = "ffmpeg",
+        ffprobe_bin: str = "ffprobe",
+    ) -> VideoEnhanceReport:
+        """Enhance downloaded video clips with local FFmpeg filters."""
+
+        return enhance_videos(
+            downloads,
+            output_dir,
+            preset=preset,
+            ffmpeg_bin=ffmpeg_bin,
+            ffprobe_bin=ffprobe_bin,
+        )
+
+    def video_enhance_report_json(self, report: VideoEnhanceReport, indent: int = 2) -> str:
+        """Serialise a video enhancement report."""
+
+        return video_enhance_report_json(report, indent=indent)
+
+    def video_enhance_report_markdown(self, report: VideoEnhanceReport) -> str:
+        """Export a human-readable video enhancement report."""
+
+        return video_enhance_report_markdown(report)
+
+    def write_video_enhance_report(
+        self,
+        report: VideoEnhanceReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write video enhancement report outputs to disk."""
+
+        return write_video_enhance_report(report, output_dir)
 
     def build_asset_library(self, root_dir: str | Path) -> AssetLibrary:
         """Scan generated outputs into an asset library index."""
