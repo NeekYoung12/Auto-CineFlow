@@ -22,7 +22,19 @@ The current codebase is no longer only a storyboard generator. It is a working p
 
 - [DESIGN.md](./DESIGN.md): current product and technical design baseline
 - [CURRENT_ARCHITECTURE.md](./docs/CURRENT_ARCHITECTURE.md): module map and pipeline graph
+- [INTEGRATION_API.md](./docs/INTEGRATION_API.md): strict Python and CLI integration contracts for other modules
+- [NEXT_STEPS.md](./docs/NEXT_STEPS.md): prioritized continuation roadmap for future development
 - [PRODUCTION_RUNBOOK.md](./docs/PRODUCTION_RUNBOOK.md): operational commands, config, and recovery usage
+
+## Primary Integration Interface
+
+If another module needs to call into Auto-CineFlow, the primary supported interface is:
+
+- `autocineflow.CineFlowPipeline`
+
+The strict contract for what the pipeline currently supports is documented in:
+
+- [INTEGRATION_API.md](./docs/INTEGRATION_API.md)
 
 ## Current Pipeline
 
