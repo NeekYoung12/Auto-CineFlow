@@ -19,8 +19,11 @@ from .provider_payloads import (
     automatic1111_bundle,
     comfyui_bundle,
     runninghub_faceid_bundle,
+    runninghub_video_bundle_json,
     volcengine_seedream_bundle,
 )
+from .runninghub_workflows import build_runninghub_video_bundle
+from .runninghub_backend import prepare_runninghub_job, submit_runninghub_task
 
 
 class SubmissionBackend(str, Enum):
@@ -31,6 +34,7 @@ class SubmissionBackend(str, Enum):
     DRY_RUN = "dry_run"
     MINIMAX_API = "minimax_api"
     VOLCENGINE_ARK = "volcengine_ark"
+    RUNNINGHUB_API = "runninghub_api"
 
 
 class SubmissionProvider(str, Enum):
@@ -42,6 +46,9 @@ class SubmissionProvider(str, Enum):
     MINIMAX_IMAGE = "minimax_image"
     MINIMAX_VIDEO = "minimax_video"
     RUNNINGHUB_FACEID = "runninghub_faceid"
+    RUNNINGHUB_VIDEO_AUTO = "runninghub_video_auto"
+    RUNNINGHUB_VIDEO_QUALITY = "runninghub_video_quality"
+    RUNNINGHUB_VIDEO_FAST = "runninghub_video_fast"
     VOLCENGINE_SEEDREAM = "volcengine_seedream"
 
 
@@ -188,6 +195,28 @@ def build_submission_jobs_from_package(
                 scene_id=item["metadata"].get("scene_id", package.scene_id),
                 provider=provider,
                 payload=item,
+            )
+            for item in bundle
+        ]
+
+    if provider in {
+        SubmissionProvider.RUNNINGHUB_VIDEO_AUTO,
+        SubmissionProvider.RUNNINGHUB_VIDEO_QUALITY,
+        SubmissionProvider.RUNNINGHUB_VIDEO_FAST,
+    }:
+        mode = {
+            SubmissionProvider.RUNNINGHUB_VIDEO_AUTO: "auto",
+            SubmissionProvider.RUNNINGHUB_VIDEO_QUALITY: "quality",
+            SubmissionProvider.RUNNINGHUB_VIDEO_FAST: "fast",
+        }[provider]
+        bundle = build_runninghub_video_bundle(package, mode=mode)
+        return [
+            SubmissionJob(
+                job_id=item.segment_id,
+                shot_id=item.shot_id,
+                scene_id=package.scene_id,
+                provider=provider,
+                payload=item.model_dump(mode="json"),
             )
             for item in bundle
         ]
@@ -502,6 +531,40 @@ def _submit_to_volcengine_ark(job: SubmissionJob, target: SubmissionTarget) -> S
     )
 
 
+def _submit_to_runninghub_api(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
+    """Submit a prepared workflow task to RunningHub."""
+
+    workflow_key = str(job.payload.get("workflow_key", "") or "")
+    workflow_id_env = str(job.payload.get("workflow_id_env", "") or "")
+    if not workflow_key or not workflow_id_env:
+        raise ValueError(f"RunningHub job payload missing workflow metadata: {job.payload.keys()}")
+
+    workflow_id, node_info_list = prepare_runninghub_job(
+        workflow_key,
+        job.payload,
+        config_path=target.config_path or None,
+        timeout_seconds=target.timeout_seconds,
+    )
+    payload = submit_runninghub_task(
+        workflow_id=workflow_id,
+        node_info_list=node_info_list,
+        config_path=target.config_path or None,
+        timeout_seconds=target.timeout_seconds,
+    )
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    backend_job_id = str(data.get("taskId", payload.get("taskId", "")) if isinstance(data, dict) else payload.get("taskId", ""))
+    return SubmissionRecord(
+        job_id=job.job_id,
+        shot_id=job.shot_id,
+        provider=job.provider,
+        backend=target.backend,
+        status="submitted",
+        submitted_at=datetime.now(timezone.utc).isoformat(),
+        backend_job_id=backend_job_id,
+        message=str(payload.get("msg", "submitted") if isinstance(payload, dict) else "submitted"),
+    )
+
+
 def _volcengine_image_endpoint(base_url: str) -> str:
     """Resolve ARK vs LAS image-generation endpoint from a configured base URL."""
 
@@ -553,6 +616,8 @@ def submit_jobs(
             record = _submit_to_minimax_api(job, target)
         elif target.backend == SubmissionBackend.VOLCENGINE_ARK:
             record = _submit_to_volcengine_ark(job, target)
+        elif target.backend == SubmissionBackend.RUNNINGHUB_API:
+            record = _submit_to_runninghub_api(job, target)
         elif target.backend == SubmissionBackend.WEBHOOK:
             record = _submit_to_webhook(job, target)
         else:

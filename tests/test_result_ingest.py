@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import autocineflow.result_ingest as result_ingest_module
 
 from autocineflow.pipeline import CineFlowPipeline
 from autocineflow.submission import SubmissionBackend, SubmissionProvider, SubmissionTarget
@@ -193,6 +194,44 @@ def test_download_submission_artifacts_from_volcengine_url(monkeypatch):
     temp_dir = _workspace_temp_dir()
     try:
         downloads = pipeline.download_submission_artifacts(batch, temp_dir / "artifacts")
+        assert downloads.records[0].downloaded is True
+        assert downloads.records[0].output_path.endswith(".png")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_download_runninghub_artifact_via_outputs_polling(monkeypatch):
+    pipeline, package, batch = _build_submission_batch()
+    batch.records[0].provider = SubmissionProvider.RUNNINGHUB_FACEID
+    batch.records[0].backend_job_id = "rh-task-001"
+    batch.records[0].message = ""
+
+    monkeypatch.setattr(
+        result_ingest_module,
+        "poll_runninghub_outputs",
+        lambda task_id, config_path=None, timeout_seconds=900.0, poll_interval_seconds=10.0: {"outputs": [{"url": "https://example.invalid/rh.png"}]},
+    )
+    monkeypatch.setattr(
+        result_ingest_module,
+        "extract_runninghub_media_urls",
+        lambda payload, config_path=None: ["https://example.invalid/rh.png"],
+    )
+
+    class DummyResponse:
+        content = b"runninghub-image"
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(httpx, "get", lambda url, timeout=120.0: DummyResponse())
+
+    temp_dir = _workspace_temp_dir()
+    try:
+        downloads = pipeline.download_submission_artifacts(
+            batch,
+            temp_dir / "artifacts",
+            config_path="D:/Codex/workspace/config/conf",
+        )
         assert downloads.records[0].downloaded is True
         assert downloads.records[0].output_path.endswith(".png")
     finally:

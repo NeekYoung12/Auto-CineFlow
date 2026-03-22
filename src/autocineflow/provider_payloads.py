@@ -117,6 +117,8 @@ def runninghub_faceid_bundle(package: StoryboardPackage) -> list[dict[str, Any]]
             {
                 "job_id": render_job.job_id,
                 "shot_id": render_job.shot_id,
+                "workflow_key": "rh_shot_keyframe_faceid_v1",
+                "workflow_id_env": "RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1",
                 "workflow_family": "runninghub_comfyui_faceid",
                 "workflow_inputs": {
                     "positive_prompt": render_job.prompt,

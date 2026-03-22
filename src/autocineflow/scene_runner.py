@@ -8,7 +8,43 @@ from pathlib import Path
 
 from .delivery import RenderPreset
 from .pipeline import CineFlowPipeline
-from .submission import SubmissionBackend, SubmissionProvider, SubmissionTarget
+from .submission import SubmissionBackend, SubmissionJob, SubmissionProvider, SubmissionTarget
+
+
+def _is_runninghub_video_provider(provider: SubmissionProvider) -> bool:
+    return provider in {
+        SubmissionProvider.RUNNINGHUB_VIDEO_AUTO,
+        SubmissionProvider.RUNNINGHUB_VIDEO_QUALITY,
+        SubmissionProvider.RUNNINGHUB_VIDEO_FAST,
+    }
+
+
+def _inject_bootstrap_keyframes(
+    video_jobs: list[SubmissionJob],
+    downloads,
+) -> list[SubmissionJob]:
+    """Prefer freshly rendered keyframes as the first-frame candidate for RunningHub video jobs."""
+
+    download_by_shot = {
+        record.shot_id: record.output_path
+        for record in downloads.records
+        if record.downloaded and record.output_path
+    }
+    patched_jobs: list[SubmissionJob] = []
+    for job in video_jobs:
+        output_path = download_by_shot.get(job.shot_id)
+        if not output_path:
+            patched_jobs.append(job)
+            continue
+
+        payload = dict(job.payload)
+        contract = dict(payload.get("request_contract", {}))
+        existing_candidates = list(contract.get("first_frame_candidates", []))
+        merged_candidates = [output_path, *[candidate for candidate in existing_candidates if candidate != output_path]]
+        contract["first_frame_candidates"] = merged_candidates
+        payload["request_contract"] = contract
+        patched_jobs.append(job.model_copy(update={"payload": payload}))
+    return patched_jobs
 
 
 def main() -> int:
@@ -38,6 +74,7 @@ def main() -> int:
     parser.add_argument("--disable-consistency-rag", action="store_true", help="Disable local reference retrieval and consistency packaging")
     parser.add_argument("--character-reference-top-k", type=int, default=3, help="Top character candidates to keep per role")
     parser.add_argument("--scene-reference-top-k", type=int, default=4, help="Top scene candidates to keep")
+    parser.add_argument("--disable-runninghub-bootstrap", action="store_true", help="Do not generate RunningHub bootstrap keyframes before RunningHub video jobs")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -79,14 +116,64 @@ def main() -> int:
         provider=SubmissionProvider(args.provider),
     )
     selected_jobs = jobs if args.job_limit <= 0 else jobs[: args.job_limit]
+    bootstrap_files = {}
+    provider = SubmissionProvider(args.provider)
+    backend = SubmissionBackend(args.backend)
+    target = SubmissionTarget(
+        backend=backend,
+        spool_dir=args.spool_dir,
+        config_path=args.config_path or "",
+        timeout_seconds=args.timeout_seconds,
+    )
+
+    if (
+        _is_runninghub_video_provider(provider)
+        and backend == SubmissionBackend.RUNNINGHUB_API
+        and not args.disable_runninghub_bootstrap
+        and not args.skip_download
+    ):
+        keyframe_jobs = [
+            job
+            for job in pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.RUNNINGHUB_FACEID)
+            if job.shot_id in {item.shot_id for item in selected_jobs}
+        ]
+        if keyframe_jobs:
+            keyframe_batch = pipeline.submit_jobs(
+                keyframe_jobs,
+                target,
+                source_type="package_bootstrap_keyframes",
+                source_id=package.scene_id,
+            )
+            bootstrap_files.update(
+                {
+                    f"bootstrap_submission_{key}": str(value)
+                    for key, value in pipeline.write_submission_batch(
+                        keyframe_batch,
+                        output_dir / "bootstrap_keyframes" / "submission",
+                    ).items()
+                }
+            )
+            bootstrap_downloads = pipeline.download_submission_artifacts(
+                keyframe_batch,
+                output_dir / "bootstrap_keyframes" / "artifacts",
+                config_path=args.config_path,
+                timeout_seconds=max(args.timeout_seconds, 900.0),
+                poll_interval_seconds=args.poll_interval_seconds,
+            )
+            bootstrap_files.update(
+                {
+                    f"bootstrap_download_{key}": str(value)
+                    for key, value in pipeline.write_artifact_download_batch(
+                        bootstrap_downloads,
+                        output_dir / "bootstrap_keyframes" / "downloads",
+                    ).items()
+                }
+            )
+            selected_jobs = _inject_bootstrap_keyframes(selected_jobs, bootstrap_downloads)
+
     submission_batch = pipeline.submit_jobs(
         selected_jobs,
-        SubmissionTarget(
-            backend=SubmissionBackend(args.backend),
-            spool_dir=args.spool_dir,
-            config_path=args.config_path or "",
-            timeout_seconds=args.timeout_seconds,
-        ),
+        target,
         source_type="package",
         source_id=package.scene_id,
     )
@@ -161,6 +248,7 @@ def main() -> int:
                 "submitted_jobs": len(selected_jobs),
                 "downloaded_artifacts": sum(record.downloaded for record in downloads.records) if downloads else 0,
                 "queue_paused": recovery_plan.queue_paused,
+                "bootstrap_files": bootstrap_files,
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
                 "recovery_files": {key: str(value) for key, value in recovery_files.items()},

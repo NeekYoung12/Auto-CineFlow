@@ -11,6 +11,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from .config_loader import resolve_minimax_media_settings
+from .runninghub_backend import extract_runninghub_media_urls, poll_runninghub_outputs
 from .render_qa import RenderExpectation, load_render_manifest
 from .submission import SubmissionBatch, SubmissionProvider
 
@@ -123,6 +124,38 @@ def download_submission_artifacts(
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
                 )
+            except Exception as exc:  # noqa: BLE001
+                records.append(
+                    ArtifactDownloadRecord(
+                        job_id=record.job_id,
+                        shot_id=record.shot_id,
+                        url="",
+                        output_path="",
+                        downloaded=False,
+                        error=str(exc),
+                    )
+                )
+                continue
+        if (
+            not url
+            and record.provider
+            in {
+                SubmissionProvider.RUNNINGHUB_FACEID,
+                SubmissionProvider.RUNNINGHUB_VIDEO_AUTO,
+                SubmissionProvider.RUNNINGHUB_VIDEO_QUALITY,
+                SubmissionProvider.RUNNINGHUB_VIDEO_FAST,
+            }
+            and record.backend_job_id
+        ):
+            try:
+                payload = poll_runninghub_outputs(
+                    record.backend_job_id,
+                    config_path=config_path,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                )
+                urls = extract_runninghub_media_urls(payload, config_path=config_path)
+                url = urls[0] if urls else ""
             except Exception as exc:  # noqa: BLE001
                 records.append(
                     ArtifactDownloadRecord(

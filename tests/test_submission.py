@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import autocineflow.submission as submission_module
 
 from autocineflow.pipeline import CineFlowPipeline
 from autocineflow.project_delivery import ProjectSceneInput
@@ -76,6 +77,7 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     minimax_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_IMAGE)
     minimax_video_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.MINIMAX_VIDEO)
     runninghub_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.RUNNINGHUB_FACEID)
+    runninghub_video_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.RUNNINGHUB_VIDEO_AUTO)
     volcengine_jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.VOLCENGINE_SEEDREAM)
 
     assert len(generic_jobs) == 5
@@ -84,6 +86,7 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     assert len(minimax_jobs) == 5
     assert len(minimax_video_jobs) == 5
     assert len(runninghub_jobs) == 5
+    assert len(runninghub_video_jobs) == 5
     assert len(volcengine_jobs) == 5
     assert a1111_jobs[0].payload["seed"] == package.shots[0].render_seed
     assert comfy_jobs[0].payload["workflow"]["seed"] == package.shots[0].render_seed
@@ -96,6 +99,11 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     assert minimax_video_jobs[0].payload["resolution"] == "768P"
     assert len(minimax_video_jobs[0].payload["prompt"]) <= len(package.video_segments[0].prompt)
     assert runninghub_jobs[0].payload["workflow_family"] == "runninghub_comfyui_faceid"
+    assert runninghub_video_jobs[0].payload["workflow_key"] in {
+        "rh_shot_i2v_wan22_full_v1",
+        "rh_shot_i2v_wan21_hq_v1",
+    }
+    assert "request_contract" in runninghub_video_jobs[0].payload
     assert volcengine_jobs[0].payload["model"] == "doubao-seedream-4-0-250828"
     assert volcengine_jobs[0].payload["response_format"] == "url"
 
@@ -321,6 +329,36 @@ def test_submit_seedream_jobs_to_volcengine_ark_backend(monkeypatch):
         assert batch.records[0].backend_job_id == "1764041608"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_submit_jobs_to_runninghub_api_backend(monkeypatch):
+    pipeline, package = _build_package()
+    jobs = pipeline.build_submission_jobs_from_package(package, provider=SubmissionProvider.RUNNINGHUB_FACEID)
+
+    def fake_prepare(workflow_key, payload, config_path=None, timeout_seconds=120.0):
+        assert workflow_key == "rh_shot_keyframe_faceid_v1"
+        assert payload["workflow_id_env"] == "RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1"
+        return "workflow-123", [{"nodeId": "220", "fieldName": "prompt", "fieldValue": "hello"}]
+
+    def fake_submit(workflow_id, node_info_list, config_path=None, timeout_seconds=120.0):
+        assert workflow_id == "workflow-123"
+        assert node_info_list[0]["fieldName"] == "prompt"
+        return {"code": 0, "msg": "success", "data": {"taskId": "rh-task-001"}}
+
+    monkeypatch.setattr(submission_module, "prepare_runninghub_job", fake_prepare)
+    monkeypatch.setattr(submission_module, "submit_runninghub_task", fake_submit)
+
+    batch = pipeline.submit_jobs(
+        jobs[:1],
+        SubmissionTarget(
+            backend=SubmissionBackend.RUNNINGHUB_API,
+            config_path="D:/Codex/workspace/config/conf",
+        ),
+        source_type="package",
+        source_id=package.scene_id,
+    )
+    assert batch.records[0].status == "submitted"
+    assert batch.records[0].backend_job_id == "rh-task-001"
 
 
 def test_write_submission_batch_creates_outputs():

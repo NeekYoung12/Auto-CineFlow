@@ -383,6 +383,8 @@ python -m uv run python -m autocineflow.submission ^
   --output-dir out\submission_records
 ```
 
+RunningHub private workflows are now supported for both image keyframes and video clips once your `workflowId` values and exported API-format JSON files are in place.
+
 ## End-to-End Scene Runner
 
 To run one scene through generation, packaging, MiniMax submission, artifact download, and render QA:
@@ -402,12 +404,16 @@ python -m uv run python -m autocineflow.scene_runner ^
 
 For MiniMax text-to-video, swap `--provider minimax_video`.
 For Volcengine image generation, use `--provider volcengine_seedream --backend volcengine_ark`.
+For RunningHub keyframe generation, use `--provider runninghub_faceid --backend runninghub_api`.
+For RunningHub video generation, use `--provider runninghub_video_auto --backend runninghub_api`.
 
 For offline consistency-package generation only, use a dry-run backend such as `automatic1111 + dry_run` or `comfyui + dry_run`. The run will still emit:
 
 - `delivery/consistency/consistency_package.json`
 - `delivery/providers/runninghub_faceid_bundle.json`
 - `delivery/providers/volcengine_seedream_bundle.json`
+
+When `runninghub_video_auto` / `runninghub_video_quality` / `runninghub_video_fast` is used with `runninghub_api`, `scene_runner` will first generate bootstrap keyframes through `runninghub_faceid` and then inject those freshly rendered frames into the video workflow. Use `--disable-runninghub-bootstrap` to skip that step.
 
 If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
 
