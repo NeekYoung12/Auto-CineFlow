@@ -8,7 +8,13 @@ from pathlib import Path
 import httpx
 from pydantic import BaseModel, Field
 
-from .config_loader import resolve_runninghub_settings, resolve_volcengine_ark_settings
+from .config_loader import (
+    resolve_runninghub_api_format_dir,
+    resolve_runninghub_settings,
+    resolve_runninghub_workflow_ids,
+    resolve_volcengine_ark_settings,
+)
+from .runninghub_workflows import recommended_runninghub_workflows
 
 
 class ProviderProbeResult(BaseModel):
@@ -57,6 +63,56 @@ def probe_runninghub_account(
     )
 
 
+def probe_runninghub_workflow_registry(
+    config_path: str | None = None,
+) -> ProviderProbeResult:
+    """Check whether required RunningHub workflow IDs and API export JSON files are present."""
+
+    configured_ids = resolve_runninghub_workflow_ids(config_path)
+    api_format_dir = resolve_runninghub_api_format_dir(config_path)
+
+    missing_ids: list[str] = []
+    present_ids: list[str] = []
+    missing_api_formats: list[str] = []
+    present_api_formats: list[str] = []
+
+    for profile in recommended_runninghub_workflows():
+        env_name = profile.workflow_id_env
+        if configured_ids.get(env_name):
+            present_ids.append(env_name)
+        else:
+            missing_ids.append(env_name)
+
+        expected_file = api_format_dir / f"{profile.workflow_key}.json" if api_format_dir else None
+        if expected_file and expected_file.exists():
+            present_api_formats.append(str(expected_file))
+        else:
+            missing_api_formats.append(profile.workflow_key)
+
+    ok = not missing_ids and not missing_api_formats
+    message_parts: list[str] = []
+    if missing_ids:
+        message_parts.append(f"missing_ids={len(missing_ids)}")
+    if missing_api_formats:
+        message_parts.append(f"missing_api_formats={len(missing_api_formats)}")
+    if not message_parts:
+        message_parts.append("configured")
+
+    return ProviderProbeResult(
+        provider="runninghub_workflows",
+        ok=ok,
+        endpoint=str(api_format_dir or ""),
+        message=", ".join(message_parts),
+        details={
+            "present_ids": present_ids,
+            "missing_ids": missing_ids,
+            "api_format_dir": str(api_format_dir) if api_format_dir else "",
+            "present_api_formats": present_api_formats,
+            "missing_api_formats": missing_api_formats,
+        },
+    )
+
+
 def probe_volcengine_ark_config(config_path: str | None = None) -> ProviderProbeResult:
     """Check whether Volcengine ARK credentials are present and normalized."""
 
@@ -78,6 +134,7 @@ def build_provider_probe_report(
     results = [
         probe_volcengine_ark_config(config_path=config_path),
         probe_runninghub_account(config_path=config_path, timeout_seconds=timeout_seconds),
+        probe_runninghub_workflow_registry(config_path=config_path),
     ]
     return ProviderProbeReport(results=results)
 

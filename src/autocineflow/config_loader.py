@@ -170,6 +170,45 @@ def resolve_runninghub_settings(
     return api_key, base_url.rstrip("/")
 
 
+def resolve_runninghub_workflow_ids(
+    config_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Resolve configured RunningHub workflow IDs keyed by env-style variable name."""
+
+    resolved_config = Path(config_path) if config_path else discover_default_config_path()
+    sections = parse_sectioned_config(resolved_config) if resolved_config else {}
+    section = sections.get("RunningHUB", {})
+
+    workflow_ids: dict[str, str] = {}
+    for key, value in section.items():
+        if key.startswith("RUNNINGHUB_WORKFLOW_") and value:
+            workflow_ids[key] = value
+    return workflow_ids
+
+
+def resolve_runninghub_api_format_dir(
+    config_path: str | Path | None = None,
+) -> Path | None:
+    """Resolve the optional local directory containing RunningHub API export JSON files."""
+
+    if env_override := os.environ.get("RUNNINGHUB_API_FORMAT_DIR"):
+        candidate = Path(env_override)
+        return candidate if candidate.exists() else candidate
+
+    resolved_config = Path(config_path) if config_path else discover_default_config_path()
+    sections = parse_sectioned_config(resolved_config) if resolved_config else {}
+    section = sections.get("RunningHUB", {})
+    configured = section.get("RUNNINGHUB_API_FORMAT_DIR", "")
+    if configured:
+        return Path(configured)
+
+    if resolved_config:
+        default_dir = resolved_config.parent / "runninghub_api_formats"
+        if default_dir.exists():
+            return default_dir
+    return None
+
+
 def resolve_volcengine_ark_settings(
     config_path: str | Path | None = None,
 ) -> tuple[str, str]:

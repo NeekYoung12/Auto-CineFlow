@@ -9,9 +9,11 @@ from autocineflow.config_loader import (
     normalize_openai_base_url,
     parse_key_value_config,
     parse_sectioned_config,
+    resolve_runninghub_api_format_dir,
     resolve_minimax_media_settings,
     resolve_openai_settings,
     resolve_runninghub_settings,
+    resolve_runninghub_workflow_ids,
     resolve_volcengine_ark_settings,
 )
 
@@ -206,5 +208,32 @@ def test_resolve_runninghub_and_volcengine_settings_read_sections():
         assert runninghub_base_url == "https://rh.example.invalid"
         assert volcengine_api_key == "ark-key"
         assert volcengine_base_url == "https://las.example.invalid"
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_resolve_runninghub_workflow_ids_and_api_format_dir():
+    temp_dir = _workspace_temp_dir()
+    try:
+        api_dir = temp_dir / "runninghub_api_formats"
+        api_dir.mkdir()
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "RunningHUB:",
+                    "API_KEY=rh-key",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1=123456",
+                    f"RUNNINGHUB_API_FORMAT_DIR={api_dir}",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        workflow_ids = resolve_runninghub_workflow_ids(config_path)
+        api_format_dir = resolve_runninghub_api_format_dir(config_path)
+
+        assert workflow_ids["RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1"] == "123456"
+        assert api_format_dir == api_dir
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

@@ -40,6 +40,15 @@ def test_build_provider_probe_report(monkeypatch):
                     "RunningHUB:",
                     "API_KEY=rh-key",
                     "RUNNINGHUB_BASE_URL=https://rh.example.invalid",
+                    "RUNNINGHUB_WORKFLOW_RH_CHAR_IDENTITY_FORGE_V1=100",
+                    "RUNNINGHUB_WORKFLOW_RH_CHAR_SHEET_MULTIVIEW_V1=101",
+                    "RUNNINGHUB_WORKFLOW_RH_SCENE_SET_FORGE_V1=102",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1=103",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_RELIGHT_MATCH_V1=104",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_REPAIR_INPAINT_V1=105",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_I2V_WAN22_FULL_V1=106",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_I2V_WAN21_HQ_V1=107",
+                    "RUNNINGHUB_WORKFLOW_RH_SHOT_I2V_FRAMEPACK_FAST_V1=108",
                     "volcengine:",
                     "ARK_API_KEY=ark-key",
                     "VOLCENGINE_ARK_BASE_URL=https://ark.example.invalid/api/v3",
@@ -47,15 +56,34 @@ def test_build_provider_probe_report(monkeypatch):
             ),
             encoding="utf-8",
         )
+        api_dir = temp_dir / "runninghub_api_formats"
+        api_dir.mkdir()
+        for name in (
+            "rh_char_identity_forge_v1",
+            "rh_char_sheet_multiview_v1",
+            "rh_scene_set_forge_v1",
+            "rh_shot_keyframe_faceid_v1",
+            "rh_shot_relight_match_v1",
+            "rh_shot_repair_inpaint_v1",
+            "rh_shot_i2v_wan22_full_v1",
+            "rh_shot_i2v_wan21_hq_v1",
+            "rh_shot_i2v_framepack_fast_v1",
+        ):
+            (api_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+        with config_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\nRUNNINGHUB_API_FORMAT_DIR={api_dir}\n")
         report = build_provider_probe_report(config_path=str(config_path), timeout_seconds=10.0)
-        assert len(report.results) == 2
+        assert len(report.results) == 3
         assert report.results[0].provider == "volcengine_ark"
         assert report.results[0].ok is True
         assert report.results[1].provider == "runninghub"
         assert report.results[1].ok is True
+        assert report.results[2].provider == "runninghub_workflows"
+        assert report.results[2].ok is True
 
         files = write_provider_probe_report(report, temp_dir / "probe")
         payload = json.loads(files["probe_report"].read_text(encoding="utf-8"))
         assert payload["results"][1]["details"]["data"]["balance"] == 12
+        assert payload["results"][2]["details"]["missing_api_formats"] == []
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

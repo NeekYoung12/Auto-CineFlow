@@ -470,3 +470,29 @@ This currently checks:
 
 - Volcengine ARK config presence and normalized endpoint
 - RunningHub account status through the official account-status API
+- RunningHub workflow IDs and local API export JSON readiness
+
+For private RunningHub workflows, `workflowId` alone is not enough for full automation. The pipeline also expects each workflow's exported API-format JSON so it can map prompts, images, and other node values into `nodeInfoList`.
+
+By default, Auto-CineFlow will look for these files under:
+
+- `D:\Codex\workspace\config\runninghub_api_formats\`
+
+You can override that by adding this to `conf`:
+
+```text
+RunningHUB:
+RUNNINGHUB_API_FORMAT_DIR=D:\Codex\workspace\config\runninghub_api_formats
+```
+
+Expected filenames:
+
+- `rh_char_identity_forge_v1.json`
+- `rh_char_sheet_multiview_v1.json`
+- `rh_scene_set_forge_v1.json`
+- `rh_shot_keyframe_faceid_v1.json`
+- `rh_shot_relight_match_v1.json`
+- `rh_shot_repair_inpaint_v1.json`
+- `rh_shot_i2v_wan22_full_v1.json`
+- `rh_shot_i2v_wan21_hq_v1.json`
+- `rh_shot_i2v_framepack_fast_v1.json`
