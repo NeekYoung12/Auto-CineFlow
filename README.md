@@ -430,6 +430,46 @@ If you later add an optional RunningHub AI video-enhancement workflow, Auto-Cine
 RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1=workflowId
 ```
 
+## Local Visual Review
+
+Auto-CineFlow can also run an optional local visual review pass on keyframes before they enter the video stage. This is designed as a low-priority, yield-to-other-processes step:
+
+- it runs in an external Python environment
+- it can reuse a local Qwen-VL model
+- if GPU memory is tight, it returns `skipped` instead of blocking the production pipeline
+
+Default paths:
+
+```text
+PYTHON_PATH=C:\Users\neekyoung12\Documents\ComfyUI\.venv\Scripts\python.exe
+MODEL_PATH=D:\ComfyUI_ws\ComfyUI_Models\models\LLM\Qwen-VL\Huihui-Qwen3-VL-4B-Instruct-abliterated
+DEVICE_PREFERENCE=cuda
+MIN_FREE_VRAM_GB=4
+```
+
+You can override them in `conf`:
+
+```text
+Local Visual Review:
+PYTHON_PATH=C:\Users\neekyoung12\Documents\ComfyUI\.venv\Scripts\python.exe
+MODEL_PATH=D:\ComfyUI_ws\ComfyUI_Models\models\LLM\Qwen-VL\Huihui-Qwen3-VL-4B-Instruct-abliterated
+DEVICE_PREFERENCE=cuda
+MIN_FREE_VRAM_GB=4
+```
+
+Enable it explicitly in `scene_runner`:
+
+```bash
+python -m uv run python -m autocineflow.scene_runner ^
+  --description "..." ^
+  --scene-id SCENE_VLM ^
+  --output-dir out\scene_vlm ^
+  --provider runninghub_video_auto ^
+  --backend runninghub_api ^
+  --config-path D:\Codex\workspace\config\conf ^
+  --enable-local-vlm-review
+```
+
 If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
 
 ```bash

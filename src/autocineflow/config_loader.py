@@ -235,3 +235,42 @@ def resolve_volcengine_ark_settings(
         or "https://ark.cn-beijing.volces.com/api/v3"
     )
     return api_key, base_url.rstrip("/")
+
+
+def resolve_local_vlm_settings(
+    config_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Resolve local visual-review settings for the external Qwen-VL environment."""
+
+    resolved_config = Path(config_path) if config_path else discover_default_config_path()
+    sections = parse_sectioned_config(resolved_config) if resolved_config else {}
+    section = sections.get("Local Visual Review", {})
+
+    defaults = {
+        "python_path": r"C:\Users\neekyoung12\Documents\ComfyUI\.venv\Scripts\python.exe",
+        "model_path": r"D:\ComfyUI_ws\ComfyUI_Models\models\LLM\Qwen-VL\Huihui-Qwen3-VL-4B-Instruct-abliterated",
+        "device_preference": "cuda",
+        "min_free_vram_gb": "4",
+    }
+    return {
+        "python_path": (
+            os.environ.get("AUTOCINEFLOW_LOCAL_VLM_PYTHON")
+            or section.get("PYTHON_PATH")
+            or defaults["python_path"]
+        ),
+        "model_path": (
+            os.environ.get("AUTOCINEFLOW_LOCAL_VLM_MODEL")
+            or section.get("MODEL_PATH")
+            or defaults["model_path"]
+        ),
+        "device_preference": (
+            os.environ.get("AUTOCINEFLOW_LOCAL_VLM_DEVICE")
+            or section.get("DEVICE_PREFERENCE")
+            or defaults["device_preference"]
+        ),
+        "min_free_vram_gb": (
+            os.environ.get("AUTOCINEFLOW_LOCAL_VLM_MIN_FREE_VRAM_GB")
+            or section.get("MIN_FREE_VRAM_GB")
+            or defaults["min_free_vram_gb"]
+        ),
+    }

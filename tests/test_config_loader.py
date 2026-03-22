@@ -9,6 +9,7 @@ from autocineflow.config_loader import (
     normalize_openai_base_url,
     parse_key_value_config,
     parse_sectioned_config,
+    resolve_local_vlm_settings,
     resolve_runninghub_api_format_dir,
     resolve_minimax_media_settings,
     resolve_openai_settings,
@@ -235,5 +236,30 @@ def test_resolve_runninghub_workflow_ids_and_api_format_dir():
 
         assert workflow_ids["RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1"] == "123456"
         assert api_format_dir == api_dir
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_resolve_local_vlm_settings_reads_section():
+    temp_dir = _workspace_temp_dir()
+    try:
+        config_path = temp_dir / "conf"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "Local Visual Review:",
+                    "PYTHON_PATH=D:\\python.exe",
+                    "MODEL_PATH=D:\\model",
+                    "DEVICE_PREFERENCE=cpu",
+                    "MIN_FREE_VRAM_GB=6",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        settings = resolve_local_vlm_settings(config_path)
+        assert settings["python_path"] == r"D:\python.exe"
+        assert settings["model_path"] == r"D:\model"
+        assert settings["device_preference"] == "cpu"
+        assert settings["min_free_vram_gb"] == "6"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

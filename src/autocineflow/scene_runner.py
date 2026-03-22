@@ -157,6 +157,21 @@ def _should_block_video_from_keyframes(provider: SubmissionProvider, report) -> 
     return _is_runninghub_video_provider(provider) and not report.passes_gate
 
 
+def _should_block_video_from_visual_review(provider: SubmissionProvider, review_report) -> bool:
+    if not _is_runninghub_video_provider(provider):
+        return False
+    if not review_report.enabled or review_report.skipped:
+        return False
+    return any(
+        result.status == "ok"
+        and (
+            result.recommendation in {"repair", "rerender"}
+            or any(issue in {"text_artifact", "face_distortion", "anatomy_issue", "blur_issue"} for issue in result.issues)
+        )
+        for result in review_report.results
+    )
+
+
 def main() -> int:
     """CLI entry point for the end-to-end scene run."""
 
@@ -189,6 +204,8 @@ def main() -> int:
     parser.add_argument("--disable-video-enhance", action="store_true", help="Do not run local FFmpeg-based enhancement after video download")
     parser.add_argument("--disable-runninghub-ai-post", action="store_true", help="Do not run the optional RunningHub AI video post-enhancement stage")
     parser.add_argument("--allow-keyframe-qa-fail", action="store_true", help="Allow video generation even if final keyframe QA does not pass")
+    parser.add_argument("--enable-local-vlm-review", action="store_true", help="Run optional local Qwen-VL keyframe review before video generation")
+    parser.add_argument("--local-vlm-timeout-seconds", type=float, default=600.0, help="Timeout for local visual review subprocess")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -232,6 +249,7 @@ def main() -> int:
     selected_jobs = jobs if args.job_limit <= 0 else jobs[: args.job_limit]
     bootstrap_files = {}
     keyframe_qa_files = {}
+    local_visual_review_files = {}
     keyframe_gate_blocked = False
     provider = SubmissionProvider(args.provider)
     backend = SubmissionBackend(args.backend)
@@ -407,6 +425,23 @@ def main() -> int:
                     ).items()
                 }
             )
+            if args.enable_local_vlm_review:
+                local_review_report = pipeline.review_keyframes_with_local_vlm(
+                    final_keyframe_report,
+                    config_path=args.config_path,
+                    timeout_seconds=args.local_vlm_timeout_seconds,
+                )
+                local_visual_review_files.update(
+                    {
+                        f"selected_{key}": str(value)
+                        for key, value in pipeline.write_local_visual_review_report(
+                            local_review_report,
+                            output_dir / "keyframe_qc" / "local_vlm",
+                        ).items()
+                    }
+                )
+                if _should_block_video_from_visual_review(provider, local_review_report) and not args.allow_keyframe_qa_fail:
+                    keyframe_gate_blocked = True
             if _should_block_video_from_keyframes(provider, final_keyframe_report) and not args.allow_keyframe_qa_fail:
                 keyframe_gate_blocked = True
                 selected_jobs = []
@@ -604,6 +639,7 @@ def main() -> int:
                 "keyframe_gate_blocked": keyframe_gate_blocked,
                 "bootstrap_files": bootstrap_files,
                 "keyframe_qa_files": keyframe_qa_files,
+                "local_visual_review_files": local_visual_review_files,
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
                 "recovery_files": {key: str(value) for key, value in recovery_files.items()},

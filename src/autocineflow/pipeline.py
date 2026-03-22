@@ -152,6 +152,11 @@ from .asset_library import (
     latest_scene_versions,
     write_asset_library,
 )
+from .local_visual_review import (
+    LocalVisualReviewReport,
+    review_keyframes_with_local_vlm,
+    write_local_visual_review_report,
+)
 from .recovery_policy import (
     RecoveryPlan,
     build_recovery_plan,
@@ -1300,6 +1305,29 @@ class CineFlowPipeline:
         """Build repair-focused keyframe rerun jobs from QA results."""
 
         return build_keyframe_repair_jobs(keyframe_jobs, report)
+
+    def review_keyframes_with_local_vlm(
+        self,
+        keyframe_report: KeyframeQAReport,
+        config_path: str | None = None,
+        timeout_seconds: float = 600.0,
+    ) -> LocalVisualReviewReport:
+        """Run optional local visual review for keyframes."""
+
+        return review_keyframes_with_local_vlm(
+            keyframe_report,
+            config_path=config_path or self.config_path,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def write_local_visual_review_report(
+        self,
+        report: LocalVisualReviewReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write local visual review assets to disk."""
+
+        return write_local_visual_review_report(report, output_dir)
 
     def build_asset_library(self, root_dir: str | Path) -> AssetLibrary:
         """Scan generated outputs into an asset library index."""
