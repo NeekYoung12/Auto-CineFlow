@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .delivery import StoryboardPackage
 from .pipeline import CineFlowPipeline
+from .result_ingest import ArtifactDownloadBatch
 from .sequence_qa import SequenceRepairPlan
 from .submission import SubmissionBackend, SubmissionProvider, SubmissionTarget
 
@@ -36,6 +37,7 @@ def main() -> int:
     parser.add_argument("--backend", default="minimax_api", choices=[item.value for item in SubmissionBackend])
     parser.add_argument("--timeout-seconds", type=float, default=120.0, help="Submission timeout")
     parser.add_argument("--poll-interval-seconds", type=float, default=10.0, help="Artifact polling interval")
+    parser.add_argument("--auto-retry-transient", type=int, default=1, help="Automatic retry attempts for transient provider failures")
     parser.add_argument("--skip-assemble", action="store_true", help="Do not auto-stitch after repair")
     args = parser.parse_args()
 
@@ -58,16 +60,42 @@ def main() -> int:
         source_type="repair_plan",
         source_id=package.scene_id,
     )
+    recovery_plan = pipeline.build_recovery_plan(submission_batch)
+    recovery_files = pipeline.write_recovery_plan(recovery_plan, run_dir / "recovery")
+
+    for _ in range(max(args.auto_retry_transient, 0)):
+        if recovery_plan.queue_paused or not recovery_plan.retry_job_ids:
+            break
+        retry_jobs = [job for job in repair_jobs if job.job_id in set(recovery_plan.retry_job_ids)]
+        if not retry_jobs:
+            break
+        retry_batch = pipeline.submit_jobs(
+            retry_jobs,
+            SubmissionTarget(
+                backend=SubmissionBackend(args.backend),
+                config_path=args.config_path or "",
+                timeout_seconds=args.timeout_seconds,
+            ),
+            source_type="repair_retry",
+            source_id=package.scene_id,
+        )
+        submission_batch = pipeline.merge_submission_batches(submission_batch, retry_batch)
+        recovery_plan = pipeline.build_recovery_plan(submission_batch)
+        recovery_files = pipeline.write_recovery_plan(recovery_plan, run_dir / "recovery")
+
     submission_files = pipeline.write_submission_batch(submission_batch, run_dir / "repair_submission")
 
-    downloads = pipeline.download_submission_artifacts(
-        submission_batch,
-        run_dir / "artifacts",
-        config_path=args.config_path,
-        timeout_seconds=max(args.timeout_seconds, 900.0),
-        poll_interval_seconds=args.poll_interval_seconds,
-        skip_existing=True,
-    )
+    if recovery_plan.queue_paused:
+        downloads = ArtifactDownloadBatch(source_id=package.scene_id, records=[])
+    else:
+        downloads = pipeline.download_submission_artifacts(
+            submission_batch,
+            run_dir / "artifacts",
+            config_path=args.config_path,
+            timeout_seconds=max(args.timeout_seconds, 900.0),
+            poll_interval_seconds=args.poll_interval_seconds,
+            skip_existing=True,
+        )
     pipeline.write_artifact_download_batch(downloads, run_dir / "repair_downloads")
     updated_manifest = pipeline.update_render_manifest_from_downloads(run_dir / "delivery" / "render_manifest_template.json", downloads)
     qa_report = pipeline.render_qa_report(package, updated_manifest)
@@ -99,7 +127,9 @@ def main() -> int:
                 "scene_id": package.scene_id,
                 "repair_jobs": len(repair_jobs),
                 "downloaded_artifacts": sum(record.downloaded for record in downloads.records),
+                "queue_paused": recovery_plan.queue_paused,
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
+                "recovery_files": {key: str(value) for key, value in recovery_files.items()},
                 "qa_files": {key: str(value) for key, value in qa_files.items()},
                 "sequence_files": {key: str(value) for key, value in sequence_files.items()},
             },

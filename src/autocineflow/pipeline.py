@@ -81,6 +81,7 @@ from .submission import (
     SubmissionTarget,
     build_submission_jobs_from_execution_plan,
     build_submission_jobs_from_package,
+    merge_submission_batches,
     submission_batch_json,
     submission_batch_markdown,
     submit_jobs,
@@ -791,6 +792,11 @@ class CineFlowPipeline:
         """Export a human-readable submission batch."""
 
         return submission_batch_markdown(batch)
+
+    def merge_submission_batches(self, *batches: SubmissionBatch) -> SubmissionBatch:
+        """Merge multiple submission batches, keeping the latest record per job."""
+
+        return merge_submission_batches(*batches)
 
     def write_submission_batch(
         self,

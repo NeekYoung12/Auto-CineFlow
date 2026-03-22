@@ -31,6 +31,7 @@ def main() -> int:
     parser.add_argument("--spool-dir", default="", help="Filesystem spool directory")
     parser.add_argument("--timeout-seconds", type=float, default=120.0, help="Submission timeout")
     parser.add_argument("--poll-interval-seconds", type=float, default=10.0, help="Artifact polling interval for async providers")
+    parser.add_argument("--auto-retry-transient", type=int, default=1, help="Automatic retry attempts for transient provider failures")
     parser.add_argument("--skip-download", action="store_true", help="Do not download URL artifacts")
     parser.add_argument("--skip-assemble", action="store_true", help="Do not auto-stitch downloaded video clips")
     args = parser.parse_args()
@@ -78,12 +79,36 @@ def main() -> int:
         source_type="package",
         source_id=package.scene_id,
     )
+    recovery_plan = pipeline.build_recovery_plan(submission_batch)
+    recovery_files = pipeline.write_recovery_plan(recovery_plan, output_dir / "recovery")
+
+    for _ in range(max(args.auto_retry_transient, 0)):
+        if recovery_plan.queue_paused or not recovery_plan.retry_job_ids:
+            break
+        retry_jobs = [job for job in selected_jobs if job.job_id in set(recovery_plan.retry_job_ids)]
+        if not retry_jobs:
+            break
+        retry_batch = pipeline.submit_jobs(
+            retry_jobs,
+            SubmissionTarget(
+                backend=SubmissionBackend(args.backend),
+                spool_dir=args.spool_dir,
+                config_path=args.config_path or "",
+                timeout_seconds=args.timeout_seconds,
+            ),
+            source_type="package_retry",
+            source_id=package.scene_id,
+        )
+        submission_batch = pipeline.merge_submission_batches(submission_batch, retry_batch)
+        recovery_plan = pipeline.build_recovery_plan(submission_batch)
+        recovery_files = pipeline.write_recovery_plan(recovery_plan, output_dir / "recovery")
+
     submission_files = pipeline.write_submission_batch(submission_batch, output_dir / "submission")
 
     downloads = None
     qa_files = {}
     sequence_files = {}
-    if not args.skip_download:
+    if not args.skip_download and not recovery_plan.queue_paused:
         downloads = pipeline.download_submission_artifacts(
             submission_batch,
             output_dir / "artifacts",
@@ -124,8 +149,10 @@ def main() -> int:
                 "submission_provider": submission_batch.provider.value,
                 "submitted_jobs": len(selected_jobs),
                 "downloaded_artifacts": sum(record.downloaded for record in downloads.records) if downloads else 0,
+                "queue_paused": recovery_plan.queue_paused,
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
+                "recovery_files": {key: str(value) for key, value in recovery_files.items()},
                 "qa_files": {key: str(value) for key, value in qa_files.items()},
                 "sequence_files": {key: str(value) for key, value in sequence_files.items()},
             },

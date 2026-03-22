@@ -86,6 +86,37 @@ class SubmissionBatch(BaseModel):
     records: list[SubmissionRecord] = Field(default_factory=list)
 
 
+def merge_submission_batches(*batches: SubmissionBatch) -> SubmissionBatch:
+    """Merge multiple submission batches, keeping the latest record per job."""
+
+    merged_records: dict[str, SubmissionRecord] = {}
+    ordered_ids: list[str] = []
+    source_id = ""
+    source_type = ""
+    provider = SubmissionProvider.GENERIC
+    backend = SubmissionBackend.DRY_RUN
+
+    for batch in batches:
+        source_id = batch.source_id or source_id
+        source_type = batch.source_type or source_type
+        provider = batch.provider or provider
+        backend = batch.backend or backend
+        for record in batch.records:
+            if record.job_id not in merged_records:
+                ordered_ids.append(record.job_id)
+            merged_records[record.job_id] = record
+
+    return SubmissionBatch(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        provider=provider,
+        backend=backend,
+        source_type=source_type,
+        source_id=source_id,
+        job_count=len(merged_records),
+        records=[merged_records[job_id] for job_id in ordered_ids],
+    )
+
+
 def build_submission_jobs_from_package(
     package: StoryboardPackage,
     provider: SubmissionProvider = SubmissionProvider.GENERIC,
