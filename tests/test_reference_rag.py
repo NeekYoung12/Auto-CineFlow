@@ -159,3 +159,45 @@ def test_reference_retrieval_and_consistency_package_enrich_storyboard():
         assert output_files["consistency_review"].exists()
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_consistency_filters_private_use_mojibake_phrases():
+    temp_dir = _workspace_temp_dir()
+    try:
+        reference_root = _build_reference_root(temp_dir)
+        bad_prompt_manifest = reference_root / "cyberpunk_demo" / "characters" / "char-bad_manifest.json"
+        base_image = reference_root / "cyberpunk_demo" / "characters" / "char-bad" / "char-bad_base.png"
+        _write_image(base_image, (60, 60, 60))
+        bad_prompt_manifest.write_text(
+            json.dumps(
+                {
+                    "character_id": "char-bad",
+                    "base_image_path": str(base_image),
+                    "standardized_views": {"wide_shot": str(base_image)},
+                    "prompt": "detective, 涓昏, black coat",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        pipeline = CineFlowPipeline()
+        context = pipeline.run(
+            description="A detective in black coat stands in a neon alley.",
+            num_shots=3,
+            scene_id="CONSISTENCY_FILTER_SCENE",
+            use_llm=False,
+            emotion_override="tense",
+        )
+        package = pipeline.build_storyboard_package(
+            context,
+            project_name="Consistency Filter",
+            reference_roots=[reference_root],
+        )
+
+        assert package.character_bible[0].identity_prompt
+        assert "涓昏" not in package.character_bible[0].identity_prompt
+        assert "涓昏" not in package.shots[0].identity_prompt_suffix
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+import unicodedata
 
 from .consistency_models import (
     CharacterFusionPlan,
@@ -53,7 +54,7 @@ def _flatten_unique(values: Iterable[str]) -> list[str]:
     ordered: list[str] = []
     for value in values:
         normalized = value.strip()
-        if not normalized or normalized in seen:
+        if not normalized or _contains_private_use_chars(normalized) or normalized in seen:
             continue
         seen.add(normalized)
         ordered.append(normalized)
@@ -107,6 +108,10 @@ def _build_multiview_prompts(fused_prompt: str) -> dict[str, str]:
         view: f"{fused_prompt}, {description}, multiview character sheet, same identity, same wardrobe"
         for view, description in view_descriptions.items()
     }
+
+
+def _contains_private_use_chars(text: str) -> bool:
+    return any(unicodedata.category(char) == "Co" for char in text)
 
 
 def _shot_preferred_view(shot_type: str) -> str:

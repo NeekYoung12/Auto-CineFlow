@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,39 @@ class RunningHubWorkflowSuite(BaseModel):
 
     generated_at: str
     profiles: list[RunningHubWorkflowProfile] = Field(default_factory=list)
+
+
+_RUNNINGHUB_BANNED_PROMPT_FRAGMENTS = {
+    "8k resolution",
+    "highly detailed",
+    "professional cinematography",
+    "cinematic photography",
+    "film grain",
+    "balanced contrast",
+    "extreme contrast",
+    "static camera",
+    "steady",
+    "professional",
+}
+
+_RUNNINGHUB_NEGATIVE_EXTRAS = [
+    "text",
+    "letters",
+    "subtitles",
+    "captions",
+    "watermark",
+    "logo",
+    "brand mark",
+    "signage text",
+    "garbled typography",
+    "distorted text",
+    "blurry",
+    "soft focus",
+    "low resolution",
+    "compression artifacts",
+    "fuzzy face",
+    "smudged details",
+]
 
 
 def recommended_runninghub_workflows() -> list[RunningHubWorkflowProfile]:
@@ -163,6 +197,51 @@ def runninghub_workflow_suite() -> RunningHubWorkflowSuite:
     )
 
 
+def sanitize_runninghub_prompt(prompt: str, max_chars: int = 420) -> str:
+    """Clean and condense a prompt for RunningHub image/video workflows."""
+
+    cleaned_parts: list[str] = []
+    seen: set[str] = set()
+    for raw_part in prompt.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if _contains_private_use_chars(part):
+            continue
+        lowered = part.lower()
+        if lowered in _RUNNINGHUB_BANNED_PROMPT_FRAGMENTS:
+            continue
+        if part in seen:
+            continue
+        seen.add(part)
+        cleaned_parts.append(part)
+
+    if not cleaned_parts:
+        cleaned_parts = ["cinematic scene", "identity-consistent character blocking"]
+
+    current = ""
+    kept: list[str] = []
+    for part in cleaned_parts:
+        candidate = f"{current}, {part}".strip(", ")
+        if len(candidate) > max_chars:
+            break
+        kept.append(part)
+        current = candidate
+    return ", ".join(kept)
+
+
+def strengthen_runninghub_negative_prompt(base: str) -> str:
+    """Augment a negative prompt to suppress text artifacts and blur."""
+
+    parts = [part.strip() for part in base.split(",") if part.strip()]
+    lowered = {part.lower() for part in parts}
+    for extra in _RUNNINGHUB_NEGATIVE_EXTRAS:
+        if extra.lower() not in lowered:
+            parts.append(extra)
+            lowered.add(extra.lower())
+    return ", ".join(parts)
+
+
 def select_runninghub_video_profile(
     shot_type: str,
     mode: str = "auto",
@@ -176,11 +255,9 @@ def select_runninghub_video_profile(
     if mode == "quality":
         return profiles["rh_shot_i2v_wan21_hq_v1"]
 
-    if shot_type in {"CLOSE_UP", "MCU"}:
-        return profiles["rh_shot_i2v_wan21_hq_v1"]
-    if primary_subject_count >= 2 and shot_type == "OVER_SHOULDER":
+    if shot_type == "OVER_SHOULDER" and primary_subject_count >= 2:
         return profiles["rh_shot_i2v_wan22_full_v1"]
-    return profiles["rh_shot_i2v_wan22_full_v1"]
+    return profiles["rh_shot_i2v_wan21_hq_v1"]
 
 
 def build_runninghub_video_bundle(
@@ -229,8 +306,8 @@ def build_runninghub_video_bundle(
                 rationale=rationale,
                 workflow_id_env=profile.workflow_id_env,
                 request_contract={
-                    "prompt": segment.prompt,
-                    "negative_prompt": segment.negative_prompt,
+                    "prompt": sanitize_runninghub_prompt(segment.prompt),
+                    "negative_prompt": strengthen_runninghub_negative_prompt(segment.negative_prompt),
                     "duration_seconds": segment.generation_duration_seconds,
                     "render_seed": segment.render_seed,
                     "target_width": 1024,
@@ -246,3 +323,7 @@ def build_runninghub_video_bundle(
         )
 
     return bundle
+
+
+def _contains_private_use_chars(text: str) -> bool:
+    return any(unicodedata.category(char) == "Co" for char in text)

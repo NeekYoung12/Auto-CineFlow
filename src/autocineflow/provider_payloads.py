@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .delivery import StoryboardPackage
-from .runninghub_workflows import build_runninghub_video_bundle, runninghub_workflow_suite
+from .runninghub_workflows import (
+    build_runninghub_video_bundle,
+    runninghub_workflow_suite,
+    sanitize_runninghub_prompt,
+    strengthen_runninghub_negative_prompt,
+)
 
 
 def _remote_urls(paths: list[str]) -> list[str]:
@@ -121,8 +126,8 @@ def runninghub_faceid_bundle(package: StoryboardPackage) -> list[dict[str, Any]]
                 "workflow_id_env": "RUNNINGHUB_WORKFLOW_RH_SHOT_KEYFRAME_FACEID_V1",
                 "workflow_family": "runninghub_comfyui_faceid",
                 "workflow_inputs": {
-                    "positive_prompt": render_job.prompt,
-                    "negative_prompt": render_job.negative_prompt,
+                    "positive_prompt": sanitize_runninghub_prompt(render_job.prompt),
+                    "negative_prompt": strengthen_runninghub_negative_prompt(render_job.negative_prompt),
                     "seed": render_job.render_seed,
                     "width": render_job.width,
                     "height": render_job.height,
