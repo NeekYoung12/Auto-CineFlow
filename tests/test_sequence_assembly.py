@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from autocineflow.pipeline import CineFlowPipeline
 
@@ -57,5 +58,30 @@ def test_write_sequence_assembly_plan_creates_ffmpeg_files():
         assert files["concat_manifest"].exists()
         assert files["concat_script"].exists()
         assert "ffmpeg" in files["concat_script"].read_text(encoding="utf-8").lower()
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_assemble_sequence_with_ffmpeg_invokes_expected_command(monkeypatch):
+    pipeline, package = _build_package()
+    plan = pipeline.build_sequence_assembly_plan(package)
+    temp_dir = _workspace_temp_dir()
+    try:
+        files = pipeline.write_sequence_assembly_plan(plan, temp_dir)
+        output_path = temp_dir / "assembly_sequence.mp4"
+
+        monkeypatch.setattr(shutil, "which", lambda name: "ffmpeg.exe")
+
+        def fake_run(command, capture_output, text, check):
+            output_path.write_bytes(b"fake-sequence")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        import subprocess
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        result = pipeline.assemble_sequence_with_ffmpeg(plan, temp_dir, output_path=output_path)
+        assert result.assembled is True
+        assert result.output_path == str(output_path)
+        assert result.command[0] == "ffmpeg"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

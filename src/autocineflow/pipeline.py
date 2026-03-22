@@ -95,6 +95,8 @@ from .submission_monitor import (
 )
 from .sequence_assembly import (
     SequenceAssemblyPlan,
+    SequenceAssemblyResult,
+    assemble_sequence_with_ffmpeg,
     build_sequence_assembly_plan,
     recommended_shot_count,
     sequence_assembly_json,
@@ -843,6 +845,7 @@ class CineFlowPipeline:
         config_path: str | None = None,
         timeout_seconds: float = 900.0,
         poll_interval_seconds: float = 10.0,
+        skip_existing: bool = True,
     ) -> ArtifactDownloadBatch:
         """Download URL-based artifacts referenced by a submission batch."""
 
@@ -852,6 +855,7 @@ class CineFlowPipeline:
             config_path=config_path,
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
+            skip_existing=skip_existing,
         )
 
     def artifact_download_batch_json(self, batch: ArtifactDownloadBatch, indent: int = 2) -> str:
@@ -899,6 +903,22 @@ class CineFlowPipeline:
         """Write sequence assembly planning assets to disk."""
 
         return write_sequence_assembly_plan(plan, output_dir)
+
+    def assemble_sequence_with_ffmpeg(
+        self,
+        plan: SequenceAssemblyPlan,
+        assembly_dir: str | Path,
+        output_path: str | Path | None = None,
+        ffmpeg_bin: str = "ffmpeg",
+    ) -> SequenceAssemblyResult:
+        """Assemble a sequence with FFmpeg."""
+
+        return assemble_sequence_with_ffmpeg(
+            plan,
+            assembly_dir=assembly_dir,
+            output_path=output_path,
+            ffmpeg_bin=ffmpeg_bin,
+        )
 
     def build_sequence_qa_report(
         self,

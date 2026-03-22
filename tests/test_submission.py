@@ -90,6 +90,7 @@ def test_build_submission_jobs_from_package_for_multiple_providers():
     assert minimax_video_jobs[0].payload["model"] == "MiniMax-Hailuo-02"
     assert minimax_video_jobs[0].payload["duration"] == 10
     assert minimax_video_jobs[0].payload["resolution"] == "768P"
+    assert len(minimax_video_jobs[0].payload["prompt"]) <= len(package.video_segments[0].prompt)
 
 
 def test_submit_jobs_to_filesystem_queue():
@@ -138,7 +139,11 @@ def test_submit_jobs_to_minimax_api_backend(monkeypatch):
             return None
 
         def json(self):
-            return {"id": "minimax-job-1", "data": {"image_urls": ["https://example.invalid/image.png"]}}
+            return {
+                "id": "minimax-job-1",
+                "data": {"image_urls": ["https://example.invalid/image.png"]},
+                "base_resp": {"status_code": 0, "status_msg": "ok"},
+            }
 
         @property
         def text(self):
@@ -177,6 +182,7 @@ def test_submit_jobs_to_minimax_api_backend(monkeypatch):
         )
         assert batch.records[0].status == "submitted"
         assert batch.records[0].backend_job_id == "minimax-job-1"
+        assert batch.records[0].provider_status_code == 0
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -190,7 +196,7 @@ def test_submit_video_jobs_to_minimax_api_backend(monkeypatch):
             return None
 
         def json(self):
-            return {"task_id": "minimax-video-task-1"}
+            return {"task_id": "minimax-video-task-1", "base_resp": {"status_code": 0, "status_msg": "ok"}}
 
         @property
         def text(self):
@@ -227,6 +233,7 @@ def test_submit_video_jobs_to_minimax_api_backend(monkeypatch):
         )
         assert batch.records[0].status == "submitted"
         assert batch.records[0].backend_job_id == "minimax-video-task-1"
+        assert batch.records[0].provider_status_message == "ok"
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

@@ -96,6 +96,26 @@ def test_write_artifact_download_batch_creates_json(monkeypatch):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def test_download_submission_artifacts_skips_existing_file(monkeypatch):
+    pipeline, package, batch = _build_submission_batch()
+    temp_dir = _workspace_temp_dir()
+    try:
+        artifacts_dir = temp_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        existing = artifacts_dir / "INGEST_SCENE_SH001.png"
+        existing.write_bytes(b"already-downloaded")
+
+        def fail_get(*args, **kwargs):
+            raise AssertionError("httpx.get should not be called when skip_existing=True")
+
+        monkeypatch.setattr(httpx, "get", fail_get)
+        downloads = pipeline.download_submission_artifacts(batch, artifacts_dir, skip_existing=True)
+        assert downloads.records[0].downloaded is True
+        assert downloads.records[0].output_path == str(existing)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def test_download_minimax_video_artifact_via_task_polling(monkeypatch):
     pipeline, package, batch = _build_submission_batch()
     batch.records[0].provider = SubmissionProvider.MINIMAX_VIDEO

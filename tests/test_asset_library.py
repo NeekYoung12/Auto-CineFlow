@@ -67,6 +67,7 @@ def test_asset_library_indexes_scene_and_project_versions():
         assert len(library.project_versions) == 1
         assert pipeline.latest_scene_versions(library)[0].scene_id == "LIB_SCENE"
         assert pipeline.latest_project_versions(library)[0].project_name == "Library Project"
+        assert pipeline.latest_scene_versions(library)[0].failed_submission_count == 0
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 

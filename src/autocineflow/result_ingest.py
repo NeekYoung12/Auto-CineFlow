@@ -105,6 +105,7 @@ def download_submission_artifacts(
     config_path: str | None = None,
     timeout_seconds: float = 900.0,
     poll_interval_seconds: float = 10.0,
+    skip_existing: bool = True,
 ) -> ArtifactDownloadBatch:
     """Download any URL-based artifacts referenced by a submission batch."""
 
@@ -148,6 +149,17 @@ def download_submission_artifacts(
             continue
 
         output_path = output_dir / f"{record.shot_id}{_extension_from_url(url)}"
+        if skip_existing and output_path.exists():
+            records.append(
+                ArtifactDownloadRecord(
+                    job_id=record.job_id,
+                    shot_id=record.shot_id,
+                    url=url,
+                    output_path=str(output_path),
+                    downloaded=True,
+                )
+            )
+            continue
         try:
             response = httpx.get(url, timeout=120.0)
             response.raise_for_status()

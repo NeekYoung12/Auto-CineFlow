@@ -70,6 +70,8 @@ class SubmissionRecord(BaseModel):
     request_path: str = ""
     response_path: str = ""
     message: str = ""
+    provider_status_code: int = 0
+    provider_status_message: str = ""
 
 
 class SubmissionBatch(BaseModel):
@@ -120,7 +122,7 @@ def build_submission_jobs_from_package(
                 provider=provider,
                 payload={
                     "model": "MiniMax-Hailuo-02",
-                    "prompt": segment.prompt,
+                    "prompt": _condense_minimax_video_prompt(segment.prompt),
                     "duration": int(segment.generation_duration_seconds),
                     "resolution": "768P",
                 },
@@ -191,7 +193,7 @@ def build_submission_jobs_from_execution_plan(
         elif provider == SubmissionProvider.MINIMAX_VIDEO:
             payload = {
                 "model": "MiniMax-Hailuo-02",
-                "prompt": item.get("prompt", ""),
+                "prompt": _condense_minimax_video_prompt(item.get("prompt", "")),
                 "duration": 6,
                 "resolution": "768P",
             }
@@ -223,6 +225,43 @@ def _aspect_ratio_label(width: int, height: int) -> str:
         "9:16": 9 / 16,
     }
     return min(supported, key=lambda label: abs(supported[label] - ratio))
+
+
+def _condense_minimax_video_prompt(prompt: str, max_chars: int = 320) -> str:
+    """Reduce a long cinematic prompt to a shorter video-friendly prompt."""
+
+    banned_fragments = {
+        "8k resolution",
+        "highly detailed",
+        "professional cinematography",
+        "cinematic photography",
+        "film grain",
+        "balanced contrast",
+        "extreme contrast",
+        "static camera",
+        "steady",
+        "professional",
+    }
+    parts: list[str] = []
+    for raw_part in prompt.split(","):
+        cleaned = raw_part.strip()
+        if not cleaned:
+            continue
+        if cleaned.lower() in banned_fragments:
+            continue
+        if cleaned not in parts:
+            parts.append(cleaned)
+
+    kept: list[str] = []
+    current = ""
+    for part in parts:
+        candidate = f"{current}, {part}".strip(", ")
+        if len(candidate) > max_chars:
+            break
+        kept.append(part)
+        current = candidate
+
+    return ", ".join(kept)
 
 
 def _submit_to_filesystem(job: SubmissionJob, target: SubmissionTarget) -> SubmissionRecord:
@@ -294,7 +333,13 @@ def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> Subm
     payload = response.json()
     media_message = ""
     backend_job_id = ""
+    provider_status_code = 0
+    provider_status_message = ""
     if isinstance(payload, dict):
+        base_resp = payload.get("base_resp", {})
+        if isinstance(base_resp, dict):
+            provider_status_code = int(base_resp.get("status_code", 0) or 0)
+            provider_status_message = str(base_resp.get("status_msg", "") or "")
         if job.provider == SubmissionProvider.MINIMAX_IMAGE:
             data = payload.get("data", {})
             if isinstance(data, dict):
@@ -314,6 +359,8 @@ def _submit_to_minimax_api(job: SubmissionJob, target: SubmissionTarget) -> Subm
         submitted_at=datetime.now(timezone.utc).isoformat(),
         backend_job_id=backend_job_id or (str(payload.get("id", "")) if isinstance(payload, dict) else ""),
         message=media_message or response.text[:300],
+        provider_status_code=provider_status_code,
+        provider_status_message=provider_status_message,
     )
 
 

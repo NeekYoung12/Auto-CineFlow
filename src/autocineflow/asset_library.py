@@ -28,6 +28,8 @@ class SceneAssetVersion(BaseModel):
     render_qa_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     sequence_qa_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     submission_count: int = Field(default=0, ge=0)
+    failed_submission_count: int = Field(default=0, ge=0)
+    provider_status_summary: list[str] = Field(default_factory=list)
     provider: str = ""
     available_files: list[str] = Field(default_factory=list)
 
@@ -45,6 +47,7 @@ class ProjectAssetVersion(BaseModel):
     average_render_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     reuse_count: int = Field(default=0, ge=0)
     rerender_count: int = Field(default=0, ge=0)
+    total_failed_submissions: int = Field(default=0, ge=0)
     available_files: list[str] = Field(default_factory=list)
 
 
@@ -87,9 +90,20 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
 
     provider = ""
     submission_count = 0
+    failed_submission_count = 0
+    provider_status_summary: list[str] = []
     if submission_payload:
         provider = str(submission_payload.get("provider", ""))
         submission_count = int(submission_payload.get("job_count", 0))
+        records = submission_payload.get("records", [])
+        failed_submission_count = sum(1 for record in records if not record.get("backend_job_id"))
+        provider_status_summary = sorted(
+            {
+                f"{record.get('provider_status_code', 0)}:{record.get('provider_status_message', '')}"
+                for record in records
+                if record.get("provider_status_code") or record.get("provider_status_message")
+            }
+        )
 
     return SceneAssetVersion(
         scene_id=package.scene_id,
@@ -105,6 +119,8 @@ def index_scene_asset_version(manifest_path: str | Path) -> SceneAssetVersion:
         render_qa_score=float(render_qa_payload.get("score")) if render_qa_payload and "score" in render_qa_payload else None,
         sequence_qa_score=float(sequence_qa_payload.get("score")) if sequence_qa_payload and "score" in sequence_qa_payload else None,
         submission_count=submission_count,
+        failed_submission_count=failed_submission_count,
+        provider_status_summary=provider_status_summary,
         provider=provider,
         available_files=_scene_files(base_dir.parent),
     )
@@ -123,12 +139,18 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
 
     reuse_count = 0
     rerender_count = 0
+    total_failed_submissions = 0
     if dashboard_payload:
         reuse_count = int(dashboard_payload.get("total_reuse_count", 0))
         rerender_count = int(dashboard_payload.get("total_rerender_count", 0))
     elif execution_payload:
         reuse_count = len(execution_payload.get("reuse_manifest", []))
         rerender_count = len(execution_payload.get("rerender_queue", []))
+
+    scenes_dir = base_dir / "scenes"
+    for manifest in scenes_dir.glob("*/storyboard_package.json"):
+        scene_version = index_scene_asset_version(manifest)
+        total_failed_submissions += scene_version.failed_submission_count
 
     return ProjectAssetVersion(
         project_name=package.project_name,
@@ -145,6 +167,7 @@ def index_project_asset_version(manifest_path: str | Path) -> ProjectAssetVersio
         ),
         reuse_count=reuse_count,
         rerender_count=rerender_count,
+        total_failed_submissions=total_failed_submissions,
         available_files=_scene_files(base_dir),
     )
 
@@ -218,6 +241,7 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Quality: `{scene.quality_score:.3f}`",
                 f"- Render QA: `{scene.render_qa_score if scene.render_qa_score is not None else 'n/a'}`",
                 f"- Sequence QA: `{scene.sequence_qa_score if scene.sequence_qa_score is not None else 'n/a'}`",
+                f"- Failed Submissions: `{scene.failed_submission_count}`",
                 "",
             ]
         )
@@ -233,6 +257,7 @@ def asset_library_markdown(library: AssetLibrary) -> str:
                 f"- Avg Quality: `{project.average_quality_score:.3f}`",
                 f"- Avg Render QA: `{project.average_render_score if project.average_render_score is not None else 'n/a'}`",
                 f"- Reuse / Rerender: `{project.reuse_count}/{project.rerender_count}`",
+                f"- Failed Submissions: `{project.total_failed_submissions}`",
                 "",
             ]
         )

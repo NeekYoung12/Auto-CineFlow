@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
+import subprocess
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -31,6 +33,16 @@ class SequenceAssemblyPlan(BaseModel):
     target_duration_seconds: float = Field(..., ge=0.1)
     editorial_duration_seconds: float = Field(..., ge=0.1)
     clips: list[SequenceClip] = Field(default_factory=list)
+
+
+class SequenceAssemblyResult(BaseModel):
+    """Result of running an FFmpeg assembly job."""
+
+    scene_id: str
+    assembled: bool
+    output_path: str = ""
+    command: list[str] = Field(default_factory=list)
+    message: str = ""
 
 
 def recommended_shot_count(
@@ -83,7 +95,12 @@ def sequence_assembly_json(plan: SequenceAssemblyPlan, indent: int = 2) -> str:
 def ffmpeg_concat_manifest(plan: SequenceAssemblyPlan) -> str:
     """Build an FFmpeg concat manifest."""
 
-    return "".join(f"file '{clip.expected_asset_path.replace('\\', '/')}'\n" for clip in plan.clips)
+    lines = ["ffconcat version 1.0"]
+    for clip in plan.clips:
+        lines.append(f"file '{clip.expected_asset_path.replace('\\', '/')}'")
+        if clip.editorial_duration_seconds > 0:
+            lines.append(f"outpoint {clip.editorial_duration_seconds:.2f}")
+    return "\n".join(lines) + "\n"
 
 
 def ffmpeg_concat_script(plan: SequenceAssemblyPlan) -> str:
@@ -93,9 +110,57 @@ def ffmpeg_concat_script(plan: SequenceAssemblyPlan) -> str:
     return (
         "@echo off\n"
         "setlocal\n"
-        "ffmpeg -y -f concat -safe 0 -i ffmpeg_concat_manifest.txt -c copy "
+        "ffmpeg -y -f concat -safe 0 -i ffmpeg_concat_manifest.txt "
+        "-c:v libx264 -pix_fmt yuv420p -an -movflags +faststart "
         f"{output_name}\n"
         "endlocal\n"
+    )
+
+
+def assemble_sequence_with_ffmpeg(
+    plan: SequenceAssemblyPlan,
+    assembly_dir: str | Path,
+    output_path: str | Path | None = None,
+    ffmpeg_bin: str = "ffmpeg",
+) -> SequenceAssemblyResult:
+    """Assemble the sequence with FFmpeg using the generated concat manifest."""
+
+    assembly_dir = Path(assembly_dir)
+    manifest_path = assembly_dir / "ffmpeg_concat_manifest.txt"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Concat manifest not found: {manifest_path}")
+
+    if shutil.which(ffmpeg_bin) is None:
+        raise FileNotFoundError(f"FFmpeg binary not found: {ffmpeg_bin}")
+
+    output_path = Path(output_path) if output_path else assembly_dir / f"{plan.scene_id.lower()}_sequence.mp4"
+    command = [
+        ffmpeg_bin,
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(manifest_path),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-an",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    assembled = completed.returncode == 0 and output_path.exists()
+    message = completed.stderr[-1000:] if completed.stderr else completed.stdout[-1000:]
+    return SequenceAssemblyResult(
+        scene_id=plan.scene_id,
+        assembled=assembled,
+        output_path=str(output_path) if assembled else "",
+        command=command,
+        message=message.strip(),
     )
 
 

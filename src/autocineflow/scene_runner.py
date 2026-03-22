@@ -30,7 +30,9 @@ def main() -> int:
     parser.add_argument("--backend", default="minimax_api", choices=[item.value for item in SubmissionBackend])
     parser.add_argument("--spool-dir", default="", help="Filesystem spool directory")
     parser.add_argument("--timeout-seconds", type=float, default=120.0, help="Submission timeout")
+    parser.add_argument("--poll-interval-seconds", type=float, default=10.0, help="Artifact polling interval for async providers")
     parser.add_argument("--skip-download", action="store_true", help="Do not download URL artifacts")
+    parser.add_argument("--skip-assemble", action="store_true", help="Do not auto-stitch downloaded video clips")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -80,16 +82,37 @@ def main() -> int:
 
     downloads = None
     qa_files = {}
+    sequence_files = {}
     if not args.skip_download:
         downloads = pipeline.download_submission_artifacts(
             submission_batch,
             output_dir / "artifacts",
             config_path=args.config_path,
+            timeout_seconds=max(args.timeout_seconds, 900.0),
+            poll_interval_seconds=args.poll_interval_seconds,
         )
         pipeline.write_artifact_download_batch(downloads, output_dir / "downloads")
         updated_manifest = pipeline.update_render_manifest_from_downloads(delivery_files["render_manifest_template"], downloads)
         qa_report = pipeline.render_qa_report(package, updated_manifest)
         qa_files = pipeline.write_render_qa_report(qa_report, output_dir / "qa")
+
+        if SubmissionProvider(args.provider) == SubmissionProvider.MINIMAX_VIDEO:
+            assembly_plan = pipeline.build_sequence_assembly_plan(package, artifacts_dir=str(output_dir / "artifacts"))
+            if not args.skip_assemble and len(selected_jobs) == len(package.video_segments):
+                assembly_result = pipeline.assemble_sequence_with_ffmpeg(
+                    assembly_plan,
+                    output_dir / "delivery" / "assembly",
+                    output_path=output_dir / "artifacts" / f"{package.scene_id.lower()}_sequence.mp4",
+                )
+                sequence_report = pipeline.build_sequence_qa_report(
+                    assembly_plan,
+                    output_dir / "artifacts",
+                    final_sequence_filename=Path(assembly_result.output_path).name if assembly_result.output_path else None,
+                )
+            else:
+                sequence_report = pipeline.build_sequence_qa_report(assembly_plan, output_dir / "artifacts")
+            sequence_repair = pipeline.build_sequence_repair_plan(sequence_report)
+            sequence_files = pipeline.write_sequence_qc_outputs(sequence_report, sequence_repair, output_dir / "sequence_qc")
 
     print(
         json.dumps(
@@ -104,6 +127,7 @@ def main() -> int:
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
                 "qa_files": {key: str(value) for key, value in qa_files.items()},
+                "sequence_files": {key: str(value) for key, value in sequence_files.items()},
             },
             ensure_ascii=False,
             indent=2,

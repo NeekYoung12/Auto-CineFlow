@@ -311,18 +311,33 @@ def build_video_segments(
     max_duration = render_preset.video_max_duration_seconds
     target_duration = min(render_preset.video_target_duration_seconds, max_duration)
     handle_seconds = render_preset.video_handle_seconds
+    allowed_generation_durations = [6.0, 10.0]
 
     for shot in delivery_shots:
         coverage_duration = max(shot.duration_seconds + (2 * handle_seconds), target_duration)
-        remaining = coverage_duration
+        remaining = round(coverage_duration, 6)
         segment_index = 1
         start_offset = 0.0
-        total_segments = max(1, int((coverage_duration + max_duration - 1e-9) // max_duration))
-        if total_segments * max_duration < coverage_duration:
-            total_segments += 1
+        provisional_durations: list[float] = []
+        while remaining > 0:
+            if remaining <= allowed_generation_durations[0]:
+                current_duration = allowed_generation_durations[0]
+            elif remaining <= allowed_generation_durations[1]:
+                current_duration = allowed_generation_durations[1]
+            else:
+                current_duration = allowed_generation_durations[1]
+            provisional_durations.append(current_duration)
+            remaining = round(remaining - current_duration, 6)
+        total_segments = len(provisional_durations)
+        remaining = round(coverage_duration, 6)
 
         while remaining > 0:
-            current_duration = min(max_duration, remaining)
+            if remaining <= allowed_generation_durations[0]:
+                current_duration = allowed_generation_durations[0]
+            elif remaining <= allowed_generation_durations[1]:
+                current_duration = allowed_generation_durations[1]
+            else:
+                current_duration = allowed_generation_durations[1]
             continuation_note = ""
             if total_segments > 1:
                 if segment_index == 1:

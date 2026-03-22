@@ -339,6 +339,14 @@ python -m uv run python -m autocineflow.scene_runner ^
 
 For MiniMax text-to-video, swap `--provider minimax_video`.
 
+If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
+
+```bash
+python -m uv run python -m autocineflow.scene_resume ^
+  --run-dir out\scene_40s_full_v2 ^
+  --config-path D:\Codex\workspace\config\conf
+```
+
 ## Submission Monitoring
 
 For filesystem-backed queues you can monitor batch progress:

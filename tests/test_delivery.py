@@ -55,7 +55,8 @@ def test_build_storyboard_package_contains_stable_shot_ids():
     assert package.character_bible[0].char_id == "CHAR_A"
     assert package.character_bible[0].default_seed >= 420000
     assert package.shots[0].render_seed >= 420000
-    assert package.video_segments[0].generation_duration_seconds == 10.0
+    assert package.video_segments[0].generation_duration_seconds in {6.0, 10.0}
+    assert all(segment.generation_duration_seconds in {6.0, 10.0} for segment in package.video_segments)
     assert package.video_segments[0].segment_id.endswith("SEG01")
     assert package.shots[0].reference_shot_id == ""
     assert package.shots[1].reference_shot_id == "DELIVERY_SCENE_SH001"
