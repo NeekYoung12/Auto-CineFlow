@@ -415,6 +415,21 @@ For offline consistency-package generation only, use a dry-run backend such as `
 
 When `runninghub_video_auto` / `runninghub_video_quality` / `runninghub_video_fast` is used with `runninghub_api`, `scene_runner` will first generate bootstrap keyframes through `runninghub_faceid` and then inject those freshly rendered frames into the video workflow. Use `--disable-runninghub-bootstrap` to skip that step.
 
+The RunningHub video path now includes two optional quality stages:
+
+- keyframe rebuild before video generation
+  - bootstrap keyframe -> rebuilt keyframe -> video
+  - disable with `--disable-runninghub-keyframe-rebuild`
+- local video enhancement after download
+  - denoise + upscale + sharpen + light grading
+  - disable with `--disable-video-enhance`
+
+If you later add an optional RunningHub AI video-enhancement workflow, Auto-CineFlow can run that stage before the local FFmpeg fallback. The expected config key is:
+
+```text
+RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1=workflowId
+```
+
 If a long scene run only downloads part of its clips on the first pass, you can resume it without resubmitting jobs:
 
 ```bash

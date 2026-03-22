@@ -80,13 +80,13 @@ def probe_runninghub_workflow_registry(
         env_name = profile.workflow_id_env
         if configured_ids.get(env_name):
             present_ids.append(env_name)
-        else:
+        elif profile.required:
             missing_ids.append(env_name)
 
         expected_file = api_format_dir / f"{profile.workflow_key}.json" if api_format_dir else None
         if expected_file and expected_file.exists():
             present_api_formats.append(str(expected_file))
-        else:
+        elif profile.required:
             missing_api_formats.append(profile.workflow_key)
 
     ok = not missing_ids and not missing_api_formats

@@ -23,6 +23,7 @@ class RunningHubWorkflowProfile(BaseModel):
     optional_inputs: list[str] = Field(default_factory=list)
     notes: str = ""
     workflow_id_env: str = ""
+    required: bool = True
 
 
 class RunningHubVideoPlanItem(BaseModel):
@@ -184,6 +185,19 @@ def recommended_runninghub_workflows() -> list[RunningHubWorkflowProfile]:
             optional_inputs=["negative_prompt"],
             notes="Use only for quick previz or motion validation, not final hero delivery.",
             workflow_id_env="RUNNINGHUB_WORKFLOW_RH_SHOT_I2V_FRAMEPACK_FAST_V1",
+        ),
+        RunningHubWorkflowProfile(
+            workflow_key="rh_video_post_enhance_v1",
+            category="video_post",
+            title="FlashVSR视频超分高清修复〖Ultra-Fast〗",
+            page_url="https://www.runninghub.cn/post/1979518050577846274",
+            recommended_role="AI post enhancement for generated previs clips after video synthesis.",
+            mode="post",
+            required_inputs=["source_video"],
+            optional_inputs=["scale_mode", "quality_mode"],
+            notes="Optional post stage. If configured, run this before local FFmpeg enhancement.",
+            workflow_id_env="RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1",
+            required=False,
         ),
     ]
 

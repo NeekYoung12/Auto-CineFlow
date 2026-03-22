@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .config_loader import resolve_runninghub_workflow_ids
 from .delivery import RenderPreset
 from .pipeline import CineFlowPipeline
 from .submission import SubmissionBackend, SubmissionJob, SubmissionProvider, SubmissionTarget
@@ -47,6 +48,43 @@ def _inject_bootstrap_keyframes(
     return patched_jobs
 
 
+def _build_rebuild_keyframe_jobs(
+    keyframe_jobs: list[SubmissionJob],
+    downloads,
+) -> list[SubmissionJob]:
+    """Create a second-pass keyframe rebuild using bootstrap outputs as init references."""
+
+    download_by_shot = {
+        record.shot_id: record.output_path
+        for record in downloads.records
+        if record.downloaded and record.output_path
+    }
+    rebuilt_jobs: list[SubmissionJob] = []
+    for job in keyframe_jobs:
+        bootstrap_path = download_by_shot.get(job.shot_id)
+        if not bootstrap_path:
+            continue
+        payload = dict(job.payload)
+        inputs = dict(payload.get("workflow_inputs", {}))
+        positive_prompt = str(inputs.get("positive_prompt", "") or "")
+        if "high fidelity facial detail" not in positive_prompt:
+            positive_prompt = f"{positive_prompt}, high fidelity facial detail, crisp garment texture, clean signage-free background"
+        scene_refs = [bootstrap_path, *[path for path in inputs.get("scene_reference_images", []) if path != bootstrap_path]]
+        inputs["scene_reference_images"] = scene_refs[:4]
+        inputs["positive_prompt"] = positive_prompt
+        inputs["steps"] = max(int(inputs.get("steps", 30) or 30), 42)
+        payload["workflow_inputs"] = inputs
+        rebuilt_jobs.append(
+            job.model_copy(
+                update={
+                    "job_id": f"{job.job_id}_REBUILD",
+                    "payload": payload,
+                }
+            )
+        )
+    return rebuilt_jobs
+
+
 def _video_provider_needs_enhancement(provider: SubmissionProvider) -> bool:
     return provider in {
         SubmissionProvider.MINIMAX_VIDEO,
@@ -58,6 +96,32 @@ def _video_provider_needs_enhancement(provider: SubmissionProvider) -> bool:
 
 def _is_sequence_video_provider(provider: SubmissionProvider) -> bool:
     return provider == SubmissionProvider.MINIMAX_VIDEO or _is_runninghub_video_provider(provider)
+
+
+def _runninghub_ai_post_enhance_available(config_path: str | None) -> bool:
+    workflow_ids = resolve_runninghub_workflow_ids(config_path)
+    return bool(workflow_ids.get("RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1"))
+
+
+def _build_runninghub_post_enhance_jobs(downloads) -> list[SubmissionJob]:
+    jobs: list[SubmissionJob] = []
+    for record in downloads.records:
+        if not record.downloaded or not record.output_path.lower().endswith(".mp4"):
+            continue
+        jobs.append(
+            SubmissionJob(
+                job_id=f"{record.shot_id}_POST_ENH",
+                shot_id=record.shot_id,
+                scene_id=downloads.source_id,
+                provider=SubmissionProvider.RUNNINGHUB_VIDEO_AUTO,
+                payload={
+                    "workflow_key": "rh_video_post_enhance_v1",
+                    "workflow_id_env": "RUNNINGHUB_WORKFLOW_RH_VIDEO_POST_ENHANCE_V1",
+                    "source_video_path": record.output_path,
+                },
+            )
+        )
+    return jobs
 
 
 def main() -> int:
@@ -88,7 +152,9 @@ def main() -> int:
     parser.add_argument("--character-reference-top-k", type=int, default=3, help="Top character candidates to keep per role")
     parser.add_argument("--scene-reference-top-k", type=int, default=4, help="Top scene candidates to keep")
     parser.add_argument("--disable-runninghub-bootstrap", action="store_true", help="Do not generate RunningHub bootstrap keyframes before RunningHub video jobs")
+    parser.add_argument("--disable-runninghub-keyframe-rebuild", action="store_true", help="Do not run the second-pass high-fidelity keyframe rebuild before video generation")
     parser.add_argument("--disable-video-enhance", action="store_true", help="Do not run local FFmpeg-based enhancement after video download")
+    parser.add_argument("--disable-runninghub-ai-post", action="store_true", help="Do not run the optional RunningHub AI video post-enhancement stage")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -183,7 +249,42 @@ def main() -> int:
                     ).items()
                 }
             )
-            selected_jobs = _inject_bootstrap_keyframes(selected_jobs, bootstrap_downloads)
+            rebuild_downloads = bootstrap_downloads
+            if not args.disable_runninghub_keyframe_rebuild:
+                rebuild_jobs = _build_rebuild_keyframe_jobs(keyframe_jobs, bootstrap_downloads)
+                if rebuild_jobs:
+                    rebuild_batch = pipeline.submit_jobs(
+                        rebuild_jobs,
+                        target,
+                        source_type="package_rebuild_keyframes",
+                        source_id=package.scene_id,
+                    )
+                    bootstrap_files.update(
+                        {
+                            f"rebuild_submission_{key}": str(value)
+                            for key, value in pipeline.write_submission_batch(
+                                rebuild_batch,
+                                output_dir / "rebuild_keyframes" / "submission",
+                            ).items()
+                        }
+                    )
+                    rebuild_downloads = pipeline.download_submission_artifacts(
+                        rebuild_batch,
+                        output_dir / "rebuild_keyframes" / "artifacts",
+                        config_path=args.config_path,
+                        timeout_seconds=max(args.timeout_seconds, 900.0),
+                        poll_interval_seconds=args.poll_interval_seconds,
+                    )
+                    bootstrap_files.update(
+                        {
+                            f"rebuild_download_{key}": str(value)
+                            for key, value in pipeline.write_artifact_download_batch(
+                                rebuild_downloads,
+                                output_dir / "rebuild_keyframes" / "downloads",
+                            ).items()
+                        }
+                    )
+            selected_jobs = _inject_bootstrap_keyframes(selected_jobs, rebuild_downloads)
 
     submission_batch = pipeline.submit_jobs(
         selected_jobs,
@@ -221,6 +322,7 @@ def main() -> int:
     qa_files = {}
     sequence_files = {}
     enhance_files = {}
+    ai_post_files = {}
     if not args.skip_download and not recovery_plan.queue_paused:
         downloads = pipeline.download_submission_artifacts(
             submission_batch,
@@ -232,6 +334,55 @@ def main() -> int:
         pipeline.write_artifact_download_batch(downloads, output_dir / "downloads")
         enhancement_dir = output_dir / "enhanced_artifacts"
         sequence_source_dir = output_dir / "artifacts"
+        if (
+            _is_runninghub_video_provider(provider)
+            and backend == SubmissionBackend.RUNNINGHUB_API
+            and not args.disable_runninghub_ai_post
+            and _runninghub_ai_post_enhance_available(args.config_path)
+        ):
+            ai_jobs = _build_runninghub_post_enhance_jobs(downloads)
+            if ai_jobs:
+                ai_batch = pipeline.submit_jobs(
+                    ai_jobs,
+                    target,
+                    source_type="package_video_post_enhance",
+                    source_id=package.scene_id,
+                )
+                ai_post_files.update(
+                    {
+                        f"ai_post_submission_{key}": str(value)
+                        for key, value in pipeline.write_submission_batch(
+                            ai_batch,
+                            output_dir / "video_post_enhance" / "submission",
+                        ).items()
+                    }
+                )
+                ai_downloads = pipeline.download_submission_artifacts(
+                    ai_batch,
+                    output_dir / "video_post_enhance" / "artifacts",
+                    config_path=args.config_path,
+                    timeout_seconds=max(args.timeout_seconds, 900.0),
+                    poll_interval_seconds=args.poll_interval_seconds,
+                )
+                ai_post_files.update(
+                    {
+                        f"ai_post_download_{key}": str(value)
+                        for key, value in pipeline.write_artifact_download_batch(
+                            ai_downloads,
+                            output_dir / "video_post_enhance" / "downloads",
+                        ).items()
+                    }
+                )
+                ai_map = {
+                    record.shot_id: record.output_path
+                    for record in ai_downloads.records
+                    if record.downloaded and record.output_path
+                }
+                for record in downloads.records:
+                    if record.shot_id in ai_map:
+                        record.output_path = ai_map[record.shot_id]
+                if ai_map:
+                    sequence_source_dir = output_dir / "video_post_enhance" / "artifacts"
         if _video_provider_needs_enhancement(provider) and not args.disable_video_enhance:
             enhance_report = pipeline.enhance_videos(downloads, enhancement_dir)
             enhance_files = pipeline.write_video_enhance_report(enhance_report, output_dir / "enhance")
@@ -283,6 +434,7 @@ def main() -> int:
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
                 "recovery_files": {key: str(value) for key, value in recovery_files.items()},
+                "ai_post_files": {key: str(value) for key, value in ai_post_files.items()},
                 "enhance_files": {key: str(value) for key, value in enhance_files.items()},
                 "qa_files": {key: str(value) for key, value in qa_files.items()},
                 "sequence_files": {key: str(value) for key, value in sequence_files.items()},

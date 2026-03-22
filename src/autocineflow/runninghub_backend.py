@@ -218,6 +218,8 @@ def prepare_runninghub_job(
         overrides = _prepare_wan22_video_overrides(payload, timeout_seconds=timeout_seconds, config_path=config_path)
     elif workflow_key == "rh_shot_i2v_framepack_fast_v1":
         overrides = _prepare_wan22_video_overrides(payload, timeout_seconds=timeout_seconds, config_path=config_path)
+    elif workflow_key == "rh_video_post_enhance_v1":
+        overrides = _prepare_video_post_enhance_overrides(payload, timeout_seconds=timeout_seconds, config_path=config_path)
     else:
         raise NotImplementedError(f"RunningHub workflow preparation not implemented for: {workflow_key}")
 
@@ -278,6 +280,25 @@ def _prepare_wan22_video_overrides(
         overrides.append({"nodeId": "230", "fieldName": "image", "fieldValue": first_frame})
     if tail_frame:
         overrides.append({"nodeId": "225", "fieldName": "image", "fieldValue": tail_frame})
+    return overrides
+
+
+def _prepare_video_post_enhance_overrides(
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    config_path: str | None,
+) -> list[dict[str, Any]]:
+    source_video = str(payload.get("source_video_path", "") or "")
+    if not source_video:
+        raise ValueError("RunningHub video post-enhance payload missing source_video_path")
+
+    uploaded = upload_runninghub_file(source_video, "video", config_path=config_path, timeout_seconds=timeout_seconds)
+    overrides = [
+        {"nodeId": "video_input", "fieldName": "video", "fieldValue": uploaded},
+        {"nodeId": "load_video", "fieldName": "video", "fieldValue": uploaded},
+        {"nodeId": "1", "fieldName": "video", "fieldValue": uploaded},
+    ]
     return overrides
 
 
