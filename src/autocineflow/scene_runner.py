@@ -139,6 +139,13 @@ def _retry_runninghub_post_enhance_jobs(ai_jobs: list[SubmissionJob]) -> list[Su
     return retried
 
 
+def _merge_file_maps(*file_maps: dict[str, str]) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for file_map in file_maps:
+        merged.update(file_map)
+    return merged
+
+
 def main() -> int:
     """CLI entry point for the end-to-end scene run."""
 
@@ -212,6 +219,7 @@ def main() -> int:
     )
     selected_jobs = jobs if args.job_limit <= 0 else jobs[: args.job_limit]
     bootstrap_files = {}
+    keyframe_qa_files = {}
     provider = SubmissionProvider(args.provider)
     backend = SubmissionBackend(args.backend)
     target = SubmissionTarget(
@@ -255,6 +263,16 @@ def main() -> int:
                 timeout_seconds=max(args.timeout_seconds, 900.0),
                 poll_interval_seconds=args.poll_interval_seconds,
             )
+            bootstrap_report = pipeline.keyframe_qa_report(bootstrap_downloads)
+            keyframe_qa_files.update(
+                {
+                    f"bootstrap_{key}": str(value)
+                    for key, value in pipeline.write_keyframe_qa_report(
+                        bootstrap_report,
+                        output_dir / "bootstrap_keyframes" / "qa",
+                    ).items()
+                }
+            )
             bootstrap_files.update(
                 {
                     f"bootstrap_download_{key}": str(value)
@@ -290,6 +308,16 @@ def main() -> int:
                         timeout_seconds=max(args.timeout_seconds, 900.0),
                         poll_interval_seconds=args.poll_interval_seconds,
                     )
+                    rebuild_report = pipeline.keyframe_qa_report(rebuild_downloads)
+                    keyframe_qa_files.update(
+                        {
+                            f"rebuild_{key}": str(value)
+                            for key, value in pipeline.write_keyframe_qa_report(
+                                rebuild_report,
+                                output_dir / "rebuild_keyframes" / "qa",
+                            ).items()
+                        }
+                    )
                     bootstrap_files.update(
                         {
                             f"rebuild_download_{key}": str(value)
@@ -299,6 +327,63 @@ def main() -> int:
                             ).items()
                         }
                     )
+                    repair_jobs = pipeline.build_keyframe_repair_jobs(keyframe_jobs, rebuild_report)
+                    if repair_jobs:
+                        repair_batch = pipeline.submit_jobs(
+                            repair_jobs,
+                            target,
+                            source_type="package_repair_keyframes",
+                            source_id=package.scene_id,
+                        )
+                        bootstrap_files.update(
+                            {
+                                f"repair_submission_{key}": str(value)
+                                for key, value in pipeline.write_submission_batch(
+                                    repair_batch,
+                                    output_dir / "repair_keyframes" / "submission",
+                                ).items()
+                            }
+                        )
+                        repair_downloads = pipeline.download_submission_artifacts(
+                            repair_batch,
+                            output_dir / "repair_keyframes" / "artifacts",
+                            config_path=args.config_path,
+                            timeout_seconds=max(args.timeout_seconds, 900.0),
+                            poll_interval_seconds=args.poll_interval_seconds,
+                        )
+                        repair_report = pipeline.keyframe_qa_report(repair_downloads)
+                        keyframe_qa_files.update(
+                            {
+                                f"repair_{key}": str(value)
+                                for key, value in pipeline.write_keyframe_qa_report(
+                                    repair_report,
+                                    output_dir / "repair_keyframes" / "qa",
+                                ).items()
+                            }
+                        )
+                        bootstrap_files.update(
+                            {
+                                f"repair_download_{key}": str(value)
+                                for key, value in pipeline.write_artifact_download_batch(
+                                    repair_downloads,
+                                    output_dir / "repair_keyframes" / "downloads",
+                                ).items()
+                            }
+                        )
+                        rebuild_downloads = pipeline.select_best_keyframe_downloads(
+                            bootstrap_downloads,
+                            rebuild_downloads,
+                            repair_downloads,
+                        )
+                    else:
+                        rebuild_downloads = pipeline.select_best_keyframe_downloads(
+                            bootstrap_downloads,
+                            rebuild_downloads,
+                        )
+                else:
+                    rebuild_downloads = pipeline.select_best_keyframe_downloads(bootstrap_downloads)
+            else:
+                rebuild_downloads = pipeline.select_best_keyframe_downloads(bootstrap_downloads)
             selected_jobs = _inject_bootstrap_keyframes(selected_jobs, rebuild_downloads)
 
     submission_batch = pipeline.submit_jobs(
@@ -479,6 +564,7 @@ def main() -> int:
                 "downloaded_artifacts": sum(record.downloaded for record in downloads.records) if downloads else 0,
                 "queue_paused": recovery_plan.queue_paused,
                 "bootstrap_files": bootstrap_files,
+                "keyframe_qa_files": keyframe_qa_files,
                 "delivery_files": {key: str(value) for key, value in delivery_files.items()},
                 "submission_files": {key: str(value) for key, value in submission_files.items()},
                 "recovery_files": {key: str(value) for key, value in recovery_files.items()},

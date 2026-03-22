@@ -134,6 +134,15 @@ from .video_enhance import (
     video_enhance_report_markdown,
     write_video_enhance_report,
 )
+from .keyframe_qa import (
+    KeyframeQAReport,
+    build_keyframe_repair_jobs,
+    keyframe_qa_markdown,
+    keyframe_qa_report,
+    keyframe_qa_report_json,
+    select_best_keyframe_downloads,
+    write_keyframe_qa_report,
+)
 from .asset_library import (
     AssetLibrary,
     build_asset_library,
@@ -1239,6 +1248,48 @@ class CineFlowPipeline:
         """Write video enhancement report outputs to disk."""
 
         return write_video_enhance_report(report, output_dir)
+
+    def keyframe_qa_report(
+        self,
+        downloads: ArtifactDownloadBatch,
+        min_score: float = 0.75,
+    ) -> KeyframeQAReport:
+        """Evaluate downloaded keyframes before allowing them into the video stage."""
+
+        return keyframe_qa_report(downloads, min_score=min_score)
+
+    def keyframe_qa_report_json(self, report: KeyframeQAReport, indent: int = 2) -> str:
+        """Serialise a keyframe QA report."""
+
+        return keyframe_qa_report_json(report, indent=indent)
+
+    def keyframe_qa_markdown(self, report: KeyframeQAReport) -> str:
+        """Export a human-readable keyframe QA report."""
+
+        return keyframe_qa_markdown(report)
+
+    def write_keyframe_qa_report(
+        self,
+        report: KeyframeQAReport,
+        output_dir: str | Path,
+    ) -> dict[str, Path]:
+        """Write keyframe QA outputs to disk."""
+
+        return write_keyframe_qa_report(report, output_dir)
+
+    def select_best_keyframe_downloads(self, *batches: ArtifactDownloadBatch) -> ArtifactDownloadBatch:
+        """Select the best available keyframe per shot across multiple passes."""
+
+        return select_best_keyframe_downloads(*batches)
+
+    def build_keyframe_repair_jobs(
+        self,
+        keyframe_jobs: list[SubmissionJob],
+        report: KeyframeQAReport,
+    ) -> list[SubmissionJob]:
+        """Build repair-focused keyframe rerun jobs from QA results."""
+
+        return build_keyframe_repair_jobs(keyframe_jobs, report)
 
     def build_asset_library(self, root_dir: str | Path) -> AssetLibrary:
         """Scan generated outputs into an asset library index."""
